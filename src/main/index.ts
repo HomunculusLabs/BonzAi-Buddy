@@ -7,6 +7,10 @@ import { registerIpcHandlers } from './ipc'
 import { buildShellState } from './shell-state'
 import { createCompanionWindow } from './window'
 
+if (process.env.BONZI_USER_DATA_DIR?.trim()) {
+  app.setPath('userData', process.env.BONZI_USER_DATA_DIR)
+}
+
 if (process.env.BONZI_DISABLE_GPU === '1') {
   app.disableHardwareAcceleration()
 }

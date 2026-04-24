@@ -7,7 +7,7 @@ import type {
   AssistantRuntimeStatus,
   ShellState
 } from '../shared/contracts'
-import { createVrmStage } from './vrm-stage'
+import { createVrmStage, type VrmStageController } from './vrm-stage'
 
 const EXAMPLE_COMMANDS = [
   'show shell state',
@@ -35,6 +35,8 @@ interface WindowDragState {
     y: number
   }
 }
+
+type AppReadyState = 'loading' | 'ready' | 'error'
 
 function shellStateMarkup(state: ShellState): string {
   return JSON.stringify(state, null, 2)
@@ -263,8 +265,11 @@ function addAssistantTurn(
 }
 
 export function renderApp(root: HTMLDivElement): void {
+  const disableVrm =
+    new URLSearchParams(window.location.search).get('bonziDisableVrm') === '1'
+
   root.innerHTML = `
-    <main class="shell shell--ui-hidden">
+    <main class="shell shell--ui-hidden" data-app-ready="loading">
       <header class="titlebar" aria-label="Window controls and drag area">
         <div class="titlebar__brand">
           <span class="titlebar__dot"></span>
@@ -375,6 +380,10 @@ export function renderApp(root: HTMLDivElement): void {
     assistantSendButton.disabled = !enabled
   }
 
+  const setAppReadyState = (state: AppReadyState): void => {
+    shellEl.dataset.appReady = state
+  }
+
   let shellState: ShellState | null = null
   const conversation: ConversationEntry[] = []
   const pendingConfirmations = new Set<string>()
@@ -388,6 +397,7 @@ export function renderApp(root: HTMLDivElement): void {
   let unsubscribeAssistantEvents: (() => void) | null = null
 
   setAssistantInputEnabled(false)
+  setAppReadyState('loading')
 
   renderConversation(chatLogEl, conversation, pendingConfirmations, {
     isAwaitingAssistant,
@@ -513,23 +523,41 @@ export function renderApp(root: HTMLDivElement): void {
     })
   }
 
-  const vrmStage = createVrmStage(vrmCanvas, {
-    onStatusChange: (message) => {
-      vrmStatusEl.textContent = message
-    },
-    onErrorChange: (message) => {
-      if (!message) {
-        vrmErrorEl.hidden = true
-        vrmErrorEl.textContent = ''
-        vrmRetryButton.hidden = true
-        return
+  const vrmStage: VrmStageController = disableVrm
+    ? {
+        dispose: () => {},
+        load: async () => {
+          vrmStatusEl.textContent = 'VRM disabled for automated tests'
+          vrmErrorEl.hidden = true
+          vrmErrorEl.textContent = ''
+          vrmRetryButton.hidden = true
+        },
+        playBuiltInEmote: () => false
       }
+    : createVrmStage(vrmCanvas, {
+        onStatusChange: (message) => {
+          vrmStatusEl.textContent = message
+        },
+        onErrorChange: (message) => {
+          if (!message) {
+            vrmErrorEl.hidden = true
+            vrmErrorEl.textContent = ''
+            vrmRetryButton.hidden = true
+            return
+          }
 
-      vrmErrorEl.hidden = false
-      vrmErrorEl.textContent = `VRM load error: ${message}`
-      vrmRetryButton.hidden = false
-    }
-  })
+          vrmErrorEl.hidden = false
+          vrmErrorEl.textContent = `VRM load error: ${message}`
+          vrmRetryButton.hidden = false
+        }
+      })
+
+  if (disableVrm) {
+    vrmStatusEl.textContent = 'VRM disabled for automated tests'
+    vrmErrorEl.hidden = true
+    vrmErrorEl.textContent = ''
+    vrmRetryButton.hidden = true
+  }
 
   const flushPendingStageEmote = (): void => {
     if (!pendingStageEmote) {
@@ -547,6 +575,10 @@ export function renderApp(root: HTMLDivElement): void {
         syncRuntimeStatus(event.status)
         return
       case 'play-emote':
+        if (disableVrm) {
+          return
+        }
+
         if (vrmStage.playBuiltInEmote(event.emoteId)) {
           pendingStageEmote = null
           return
@@ -564,7 +596,10 @@ export function renderApp(root: HTMLDivElement): void {
 
     try {
       await vrmStage.load(shellState.vrmAssetPath)
-      flushPendingStageEmote()
+
+      if (!disableVrm) {
+        flushPendingStageEmote()
+      }
     } catch {
       // UI/error state is already updated inside the stage controller.
     }
@@ -786,6 +821,7 @@ export function renderApp(root: HTMLDivElement): void {
 
   if (!window.bonzi) {
     const message = 'Bonzi preload bridge is unavailable. Restart the app after rebuilding.'
+    setAppReadyState('error')
     shellStateEl.textContent = message
     vrmPathEl.textContent = 'Unavailable'
     setProviderLabel('Bridge unavailable')
@@ -812,6 +848,7 @@ export function renderApp(root: HTMLDivElement): void {
 
     if (shellStateResult.status === 'rejected') {
       const message = `Failed to load shell state: ${String(shellStateResult.reason)}`
+      setAppReadyState('error')
       shellStateEl.textContent = message
       vrmPathEl.textContent = 'Unavailable'
       vrmStatusEl.textContent = 'VRM failed to initialize'
@@ -840,9 +877,11 @@ export function renderApp(root: HTMLDivElement): void {
     }
 
     setAssistantInputEnabled(true)
+    setAppReadyState('ready')
     void loadVrm()
   })().catch((error: unknown) => {
     const message = `Failed to hydrate Bonzi shell: ${String(error)}`
+    setAppReadyState('error')
     shellStateEl.textContent = message
     vrmPathEl.textContent = 'Unavailable'
     vrmStatusEl.textContent = 'VRM failed to initialize'

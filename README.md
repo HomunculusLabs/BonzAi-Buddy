@@ -32,6 +32,8 @@ Bonzi now runs an embedded **Eliza runtime** in the Electron main process. The r
 - `npm run typecheck` — TypeScript checks for main/preload/renderer
 - `npm run build` — production build via `electron-vite`
 - `npm run preview` — preview built app
+- `npm run embeddings:check` — probe the configured Bonzi-managed embeddings upstream and verify the returned dimension matches Bonzi/Eliza expectations
+- `./scripts/run-local-embeddings-server.sh` — create/update a local Python venv and start the repo-local OpenAI-compatible embeddings server on port `8999` by default
 
 ## Runtime architecture (Bonzi → Eliza)
 
@@ -66,10 +68,149 @@ The renderer loads persisted history on startup. Action chips are still turn-loc
     - `BONZI_OPENAI_BASE_URL`
     - `BONZI_OPENAI_MODEL`
     - `BONZI_OPENAI_SYSTEM_PROMPT`
+  - Optional direct embedding-specific overrides (for separate embedding provider/model config):
+    - `BONZI_OPENAI_EMBEDDING_MODEL` → maps to `OPENAI_EMBEDDING_MODEL`
+    - `BONZI_OPENAI_EMBEDDING_URL` → maps to `OPENAI_EMBEDDING_URL`
+    - `BONZI_OPENAI_EMBEDDING_API_KEY` → maps to `OPENAI_EMBEDDING_API_KEY`
+    - `BONZI_OPENAI_EMBEDDING_DIMENSIONS` (must be one of `384`, `512`, `768`, `1024`, `1536`, `3072`) → maps to `OPENAI_EMBEDDING_DIMENSIONS`
+  - Optional Bonzi-managed embeddings service:
+    - Set both `BONZI_EMBEDDINGS_UPSTREAM_URL` and `BONZI_EMBEDDINGS_UPSTREAM_MODEL` to enable a local loopback `/v1/embeddings` proxy owned by Bonzi.
+    - Optional companion vars:
+      - `BONZI_EMBEDDINGS_UPSTREAM_API_KEY`
+      - `BONZI_EMBEDDINGS_UPSTREAM_DIMENSION_STRATEGY` (`strict` or `matryoshka-truncate`)
+      - `BONZI_EMBEDDINGS_SERVICE_PORT`
+      - `BONZI_EMBEDDINGS_SERVICE_TIMEOUT_MS`
+    - In this mode Bonzi probes the upstream before startup, verifies the returned vector length matches `BONZI_OPENAI_EMBEDDING_DIMENSIONS` (or the default `1536`), and then points Eliza at the local proxy instead of the upstream directly.
 - `mock` (legacy alias)
   - Accepted for compatibility, but mapped to `eliza-classic` with a warning.
 
-If `openai-compatible` is selected without an API key, Bonzi falls back to `eliza-classic` and reports a warning in shell state/chat.
+If `openai-compatible` is selected without an API key, Bonzi falls back to `eliza-classic` and reports a warning in shell state/chat. Embedding overrides are optional; if omitted, Eliza/OpenAI plugin defaults are used. If `BONZI_OPENAI_EMBEDDING_DIMENSIONS` is provided but not one of Bonzi/Eliza's supported values (`384`, `512`, `768`, `1024`, `1536`, `3072`), Bonzi ignores it and emits a startup warning.
+
+### Recommended external embeddings server: repo-local Python server
+
+Bonzi’s recommended non-LM-Studio stack is now the **repo-local Python embeddings server** in this repo.
+
+Why this stack:
+
+- It runs outside LM Studio and exposes a real OpenAI-compatible `POST /v1/embeddings` plus `GET /v1/models`.
+- It works well with Qwen’s Matryoshka embedding models through `sentence-transformers`, so Bonzi can request compatible output sizes directly instead of hoping the upstream honors them.
+- On Apple Silicon it prefers **MPS** automatically when available, with CPU fallback if needed.
+- It keeps Bonzi’s existing local loopback embeddings proxy intact, so `npm run embeddings:check` still validates the upstream before runtime startup.
+
+Two practical profiles:
+
+1. **Preferred Mac Studio profile** — `Qwen/Qwen3-Embedding-4B` on MPS at **1536** dims
+   - This is the preferred stronger-than-nomic path for Apple Silicon in this repo.
+   - `Qwen/Qwen3-Embedding-4B` supports output sizes up to **2560**, but Bonzi/Eliza currently only accepts `384`, `512`, `768`, `1024`, `1536`, or `3072`.
+   - That makes **1536** the best compatible default today.
+2. **Safe tested fallback** — `Qwen/Qwen3-Embedding-0.6B` at **1024** dims
+   - Easier to host locally if 4B is too heavy or flaky on your machine.
+   - Still a meaningful upgrade over the previous LM Studio + Nomic workaround.
+
+### Bonzi-managed embeddings service setup
+
+Use this when you want Bonzi to keep owning the local loopback proxy that Eliza talks to while the Python server acts as the upstream on `127.0.0.1:8999`.
+
+#### Start the local Python embeddings server
+
+From the repo root:
+
+```bash
+./scripts/run-local-embeddings-server.sh
+```
+
+What the helper script does:
+
+- prefers `python3.12`, then `python3.11`, then `python3`
+- creates `.venv-local-embeddings` if needed
+- installs `python/requirements-embeddings.txt` when the requirements file changes
+- uses a repo-local Hugging Face cache under `.cache/huggingface`
+- exports `PYTORCH_ENABLE_MPS_FALLBACK=1`
+- starts `python/embeddings_server.py`
+
+#### Preferred profile: Qwen3-Embedding-4B @ 1536 on port 8999
+
+```env
+BONZI_ASSISTANT_PROVIDER=openai-compatible
+BONZI_OPENAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
+BONZI_OPENAI_API_KEY=your-z-ai-api-key
+BONZI_OPENAI_MODEL=GLM-5.1
+
+BONZI_OPENAI_EMBEDDING_DIMENSIONS=1536
+BONZI_EMBEDDINGS_UPSTREAM_URL=http://127.0.0.1:8999/v1
+BONZI_EMBEDDINGS_UPSTREAM_MODEL=Qwen/Qwen3-Embedding-4B
+BONZI_EMBEDDINGS_UPSTREAM_API_KEY=
+BONZI_EMBEDDINGS_UPSTREAM_DIMENSION_STRATEGY=strict
+# optional: 0 = ephemeral loopback port chosen by Bonzi
+BONZI_EMBEDDINGS_SERVICE_PORT=0
+BONZI_EMBEDDINGS_SERVICE_TIMEOUT_MS=30000
+
+BONZI_LOCAL_EMBEDDINGS_HOST=127.0.0.1
+BONZI_LOCAL_EMBEDDINGS_PORT=8999
+BONZI_LOCAL_EMBEDDINGS_MODEL=Qwen/Qwen3-Embedding-4B
+BONZI_LOCAL_EMBEDDINGS_DEVICE=auto
+BONZI_LOCAL_EMBEDDINGS_DIMENSIONS=1536
+BONZI_LOCAL_EMBEDDINGS_BATCH_SIZE=8
+BONZI_LOCAL_EMBEDDINGS_TORCH_DTYPE=auto
+```
+
+#### Safe fallback profile: Qwen3-Embedding-0.6B @ 1024
+
+```env
+BONZI_ASSISTANT_PROVIDER=openai-compatible
+BONZI_OPENAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
+BONZI_OPENAI_API_KEY=your-z-ai-api-key
+BONZI_OPENAI_MODEL=GLM-5.1
+
+BONZI_OPENAI_EMBEDDING_DIMENSIONS=1024
+BONZI_EMBEDDINGS_UPSTREAM_URL=http://127.0.0.1:8999/v1
+BONZI_EMBEDDINGS_UPSTREAM_MODEL=Qwen/Qwen3-Embedding-0.6B
+BONZI_EMBEDDINGS_UPSTREAM_API_KEY=
+BONZI_EMBEDDINGS_UPSTREAM_DIMENSION_STRATEGY=strict
+BONZI_EMBEDDINGS_SERVICE_PORT=0
+BONZI_EMBEDDINGS_SERVICE_TIMEOUT_MS=30000
+
+BONZI_LOCAL_EMBEDDINGS_HOST=127.0.0.1
+BONZI_LOCAL_EMBEDDINGS_PORT=8999
+BONZI_LOCAL_EMBEDDINGS_MODEL=Qwen/Qwen3-Embedding-0.6B
+BONZI_LOCAL_EMBEDDINGS_DEVICE=auto
+BONZI_LOCAL_EMBEDDINGS_DIMENSIONS=1024
+BONZI_LOCAL_EMBEDDINGS_BATCH_SIZE=8
+BONZI_LOCAL_EMBEDDINGS_TORCH_DTYPE=auto
+```
+
+#### Verify the upstream before launching Bonzi
+
+```bash
+curl -s http://127.0.0.1:8999/v1/models
+npm run embeddings:check
+```
+
+The local Python server accepts OpenAI-style embedding requests including `dimensions`, and Bonzi’s proxy will fail early if the configured upstream still returns a mismatched vector length.
+
+#### Switchable local profiles
+
+Two local-only profile files are available:
+
+- `.env.custom-server` — Bonzi-managed proxy + local Python embeddings server on `127.0.0.1:8999`
+- `.env.lm-studio` — direct LM Studio embeddings profile using `text-embedding-nomic-embed-text-v1.5`
+
+Switch profiles by copying one over `.env`:
+
+```bash
+cp .env.custom-server .env
+# or
+cp .env.lm-studio .env
+```
+
+When using the custom-server profile, start the upstream first:
+
+```bash
+./scripts/run-local-embeddings-server.sh
+npm run embeddings:check
+```
+
+When using the LM Studio profile, make sure LM Studio is already serving on `http://127.0.0.1:1234/v1` before launching Bonzi.
 
 ### Z.AI setup
 

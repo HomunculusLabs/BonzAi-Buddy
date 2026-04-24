@@ -1,5 +1,6 @@
-import { app, BrowserWindow } from 'electron'
+import { BrowserWindow } from 'electron'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 export function createCompanionWindow(): BrowserWindow {
   const useTransparentWindow = process.env.BONZI_OPAQUE_WINDOW !== '1'
@@ -45,14 +46,20 @@ export function createCompanionWindow(): BrowserWindow {
     }
   }
 
-  if (app.isPackaged) {
-    void companionWindow.loadFile(join(__dirname, '../renderer/index.html'))
-  } else {
-    void companionWindow.loadURL(
-      process.env.ELECTRON_RENDERER_URL ?? 'http://127.0.0.1:5173'
-    )
-  }
+  void companionWindow.loadURL(resolveRendererTarget())
 
   return companionWindow
 }
 
+function resolveRendererTarget(): string {
+  const rendererUrl = process.env.ELECTRON_RENDERER_URL?.trim()
+  const target = rendererUrl
+    ? new URL(rendererUrl)
+    : pathToFileURL(join(__dirname, '../renderer/index.html'))
+
+  if (process.env.BONZI_DISABLE_VRM === '1') {
+    target.searchParams.set('bonziDisableVrm', '1')
+  }
+
+  return target.toString()
+}

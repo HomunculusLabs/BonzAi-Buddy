@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { app } from 'electron'
 import { join } from 'node:path'
 import {
@@ -29,6 +30,14 @@ import {
   type BonziElizaResolvedConfig
 } from './config'
 import { createBonziContextPlugin } from './bonzi-context-plugin'
+import {
+  DEFAULT_ELIZA_EMBEDDING_DIMENSION,
+  type ElizaCompatibleEmbeddingDimension
+} from './embedding-dimensions'
+import {
+  BonziExternalEmbeddingsService,
+  type ResolvedEmbeddingRuntimeSettings
+} from './external-embeddings-service'
 
 const BONZI_WORLD_ID = stringToUuid('bonzi-world')
 const BONZI_USER_ID = stringToUuid('bonzi-user')
@@ -77,6 +86,7 @@ export class BonziRuntimeManager {
   private readonly listeners = new Set<(event: AssistantEvent) => void>()
   private readonly dataDir: string
   private readonly getShellState: () => ShellState
+  private readonly embeddingsService = new BonziExternalEmbeddingsService()
 
   constructor(options: BonziRuntimeManagerOptions) {
     this.getShellState = options.getShellState
@@ -126,7 +136,12 @@ export class BonziRuntimeManager {
   }
 
   async sendCommand(command: string): Promise<BonziRuntimeTurn> {
+    const config = this.syncConfigState()
     const bundle = await this.getOrCreateRuntime()
+
+    if (config.e2eMode) {
+      return this.buildE2eTurn(command)
+    }
 
     if (!bundle.runtime.messageService) {
       throw new Error('Runtime message service not available.')
@@ -198,6 +213,8 @@ export class BonziRuntimeManager {
       await this.bundle.runtime.stop()
     }
 
+    await this.embeddingsService.stop()
+
     this.bundle = null
     this.initializing = null
     this.configSignature = null
@@ -205,16 +222,13 @@ export class BonziRuntimeManager {
 
   private async getOrCreateRuntime(): Promise<RuntimeBundle> {
     const config = this.syncConfigState()
-    const signature = JSON.stringify({
-      effectiveProvider: config.effectiveProvider,
-      systemPromptOverride: config.systemPromptOverride ?? ''
-    })
+    const signature = this.createConfigSignature(config)
 
     this.providerInfo = config.provider
     this.startupWarnings = [...config.startupWarnings]
 
     if (this.bundle && this.configSignature === signature) {
-      this.applySettings(this.bundle.runtime, config)
+      await this.applySettings(this.bundle.runtime, config)
       return this.bundle
     }
 
@@ -245,7 +259,7 @@ export class BonziRuntimeManager {
           llmMode: LLMMode.SMALL
         })
 
-        this.applySettings(runtime, config)
+        await this.applySettings(runtime, config)
         await runtime.initialize()
 
         await runtime.ensureConnection({
@@ -274,6 +288,7 @@ export class BonziRuntimeManager {
         })
         return bundle
       } catch (error) {
+        await this.embeddingsService.stop()
         const message = normalizeError(error)
         this.updateRuntimeStatus({
           backend: 'eliza',
@@ -299,6 +314,17 @@ export class BonziRuntimeManager {
     return config
   }
 
+  private buildE2eTurn(command: string): BonziRuntimeTurn {
+    return parseBonziAssistantEnvelope(
+      JSON.stringify({
+        reply: `E2E assistant reply for: ${command}`,
+        actions: command.toLowerCase().includes('shell')
+          ? [{ type: 'report-shell-state' }]
+          : []
+      })
+    )
+  }
+
   private async buildPlugins(
     config: BonziElizaResolvedConfig
   ): Promise<Plugin[]> {
@@ -317,10 +343,10 @@ export class BonziRuntimeManager {
     return [...plugins, elizaClassicPlugin]
   }
 
-  private applySettings(
+  private async applySettings(
     runtime: AgentRuntime,
     config: BonziElizaResolvedConfig
-  ): void {
+  ): Promise<void> {
     runtime.setSetting('LLM_MODE', 'DEFAULT')
     runtime.setSetting('CHECK_SHOULD_RESPOND', false)
     runtime.setSetting('LOCALDB_DATA_DIR', this.dataDir)
@@ -330,7 +356,125 @@ export class BonziRuntimeManager {
       runtime.setSetting('OPENAI_BASE_URL', config.openai.baseUrl)
       runtime.setSetting('OPENAI_SMALL_MODEL', config.openai.model)
       runtime.setSetting('OPENAI_LARGE_MODEL', config.openai.model)
+
+      const embeddingRuntimeSettings =
+        await this.resolveEmbeddingRuntimeSettings(config)
+
+      if (embeddingRuntimeSettings?.model) {
+        runtime.setSetting(
+          'OPENAI_EMBEDDING_MODEL',
+          embeddingRuntimeSettings.model
+        )
+      }
+
+      if (embeddingRuntimeSettings?.baseUrl) {
+        runtime.setSetting(
+          'OPENAI_EMBEDDING_URL',
+          embeddingRuntimeSettings.baseUrl
+        )
+      }
+
+      if (embeddingRuntimeSettings?.apiKey) {
+        runtime.setSetting(
+          'OPENAI_EMBEDDING_API_KEY',
+          embeddingRuntimeSettings.apiKey,
+          true
+        )
+      }
+
+      if (embeddingRuntimeSettings?.dimensions !== undefined) {
+        runtime.setSetting(
+          'OPENAI_EMBEDDING_DIMENSIONS',
+          String(embeddingRuntimeSettings.dimensions)
+        )
+      }
+
+      if (
+        embeddingRuntimeSettings?.warning &&
+        !this.startupWarnings.includes(embeddingRuntimeSettings.warning)
+      ) {
+        this.startupWarnings = [
+          ...this.startupWarnings,
+          embeddingRuntimeSettings.warning
+        ]
+      }
+      return
     }
+
+    await this.embeddingsService.stop()
+  }
+
+  private async resolveEmbeddingRuntimeSettings(
+    config: BonziElizaResolvedConfig
+  ): Promise<ResolvedEmbeddingRuntimeSettings | null> {
+    if (config.effectiveProvider !== 'openai-compatible' || !config.openai) {
+      await this.embeddingsService.stop()
+      return null
+    }
+
+    const embeddingConfig = config.openai.embedding
+    if (!embeddingConfig) {
+      await this.embeddingsService.stop()
+      return null
+    }
+
+    const dimensions =
+      embeddingConfig.dimensions ?? DEFAULT_ELIZA_EMBEDDING_DIMENSION
+
+    if (embeddingConfig.mode === 'local-service' && embeddingConfig.service) {
+      return this.embeddingsService.start(embeddingConfig.service, dimensions)
+    }
+
+    await this.embeddingsService.stop()
+    return {
+      model: embeddingConfig.model,
+      baseUrl: embeddingConfig.baseUrl,
+      apiKey: embeddingConfig.apiKey,
+      dimensions
+    }
+  }
+
+  private createConfigSignature(config: BonziElizaResolvedConfig): string {
+    return JSON.stringify({
+      effectiveProvider: config.effectiveProvider,
+      e2eMode: config.e2eMode,
+      systemPromptOverride: config.systemPromptOverride ?? '',
+      openai: config.openai
+        ? {
+            baseUrl: config.openai.baseUrl,
+            model: config.openai.model,
+            apiKeyFingerprint: fingerprintSecret(config.openai.apiKey),
+            embedding: config.openai.embedding
+              ? {
+                  mode: config.openai.embedding.mode,
+                  model: config.openai.embedding.model ?? '',
+                  baseUrl: config.openai.embedding.baseUrl ?? '',
+                  apiKeyFingerprint: fingerprintSecret(
+                    config.openai.embedding.apiKey
+                  ),
+                  dimensions:
+                    config.openai.embedding.dimensions ??
+                    DEFAULT_ELIZA_EMBEDDING_DIMENSION,
+                      service: config.openai.embedding.service
+                    ? {
+                        upstreamBaseUrl:
+                          config.openai.embedding.service.upstreamBaseUrl,
+                        upstreamModel:
+                          config.openai.embedding.service.upstreamModel,
+                        upstreamApiKeyFingerprint: fingerprintSecret(
+                          config.openai.embedding.service.upstreamApiKey
+                        ),
+                        dimensionStrategy:
+                          config.openai.embedding.service.dimensionStrategy,
+                        port: config.openai.embedding.service.port,
+                        timeoutMs: config.openai.embedding.service.timeoutMs
+                      }
+                    : null
+                }
+              : null
+          }
+        : null
+    })
   }
 
   private memoryToAssistantMessage(
@@ -485,4 +629,12 @@ function normalizeError(error: unknown): string {
   }
 
   return String(error)
+}
+
+function fingerprintSecret(value: string | undefined): string {
+  if (!value) {
+    return 'none'
+  }
+
+  return createHash('sha256').update(value).digest('hex')
 }
