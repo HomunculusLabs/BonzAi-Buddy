@@ -15,8 +15,15 @@ declare global {
         getShellState: () => Promise<ShellState>
       }
       window: {
+        getBounds: () => Promise<{
+          x: number
+          y: number
+          width: number
+          height: number
+        } | null>
         minimize: () => void
         close: () => void
+        setPosition: (x: number, y: number) => void
       }
       assistant: {
         sendCommand: (

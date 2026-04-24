@@ -19,6 +19,18 @@ interface ConversationEntry {
   warnings: string[]
 }
 
+interface WindowDragState {
+  pointerId: number
+  startBounds: {
+    x: number
+    y: number
+  }
+  startScreen: {
+    x: number
+    y: number
+  }
+}
+
 function shellStateMarkup(state: ShellState): string {
   return JSON.stringify(state, null, 2)
 }
@@ -207,7 +219,7 @@ function addAssistantTurn(
 
 export function renderApp(root: HTMLDivElement): void {
   root.innerHTML = `
-    <main class="shell">
+    <main class="shell shell--ui-hidden">
       <header class="titlebar" aria-label="Window controls and drag area">
         <div class="titlebar__brand">
           <span class="titlebar__dot"></span>
@@ -277,6 +289,8 @@ export function renderApp(root: HTMLDivElement): void {
   )
   const closeButton = root.querySelector<HTMLButtonElement>('[data-action="close"]')
   const vrmCanvas = root.querySelector<HTMLCanvasElement>('[data-vrm-canvas]')
+  const stageShellEl = root.querySelector<HTMLElement>('.stage-shell')
+  const shellEl = root.querySelector<HTMLElement>('.shell')
   const vrmStatusEl = root.querySelector<HTMLElement>('[data-vrm-status]')
   const vrmErrorEl = root.querySelector<HTMLElement>('[data-vrm-error]')
   const vrmRetryButton = root.querySelector<HTMLButtonElement>('[data-role="vrm-retry"]')
@@ -295,6 +309,8 @@ export function renderApp(root: HTMLDivElement): void {
     !minimizeButton ||
     !closeButton ||
     !vrmCanvas ||
+    !stageShellEl ||
+    !shellEl ||
     !vrmStatusEl ||
     !vrmErrorEl ||
     !vrmRetryButton ||
@@ -312,8 +328,38 @@ export function renderApp(root: HTMLDivElement): void {
   let shellState: ShellState | null = null
   const conversation: ConversationEntry[] = []
   const pendingConfirmations = new Set<string>()
+  let isUiVisible = false
+  let dragState: WindowDragState | null = null
 
   renderConversation(chatLogEl, conversation, pendingConfirmations)
+
+  const syncUiVisibility = (): void => {
+    const hasConversation = conversation.length > 0
+    const hasError = !vrmErrorEl.hidden
+    shellEl.classList.toggle('shell--ui-hidden', !isUiVisible)
+    shellEl.classList.toggle('shell--ui-active', isUiVisible)
+    shellEl.classList.toggle(
+      'shell--bubble-visible',
+      isUiVisible || hasConversation || hasError
+    )
+  }
+
+  const setUiVisible = (visible: boolean): void => {
+    isUiVisible = visible
+    syncUiVisibility()
+
+    if (visible) {
+      window.requestAnimationFrame(() => {
+        chatInputEl.focus()
+        chatInputEl.select()
+      })
+    }
+  }
+
+  const rerenderConversation = (): void => {
+    renderConversation(chatLogEl, conversation, pendingConfirmations)
+    syncUiVisibility()
+  }
 
   const vrmStage = createVrmStage(vrmCanvas, {
     onStatusChange: (message) => {
@@ -356,7 +402,7 @@ export function renderApp(root: HTMLDivElement): void {
       actions: [],
       warnings: []
     })
-    renderConversation(chatLogEl, conversation, pendingConfirmations)
+    rerenderConversation()
   }
 
   minimizeButton.addEventListener('click', () => {
@@ -395,7 +441,7 @@ export function renderApp(root: HTMLDivElement): void {
       actions: [],
       warnings: []
     })
-    renderConversation(chatLogEl, conversation, pendingConfirmations)
+    rerenderConversation()
 
     chatInputEl.value = ''
     chatInputEl.disabled = true
@@ -417,12 +463,15 @@ export function renderApp(root: HTMLDivElement): void {
         )
       }
 
-      renderConversation(chatLogEl, conversation, pendingConfirmations)
+      rerenderConversation()
+      setUiVisible(false)
     } catch (error) {
       appendSystemMessage(`Assistant request failed: ${String(error)}`)
     } finally {
       chatInputEl.disabled = false
-      chatInputEl.focus()
+      if (isUiVisible) {
+        chatInputEl.focus()
+      }
     }
   })
 
@@ -472,7 +521,88 @@ export function renderApp(root: HTMLDivElement): void {
     } catch (error) {
       appendSystemMessage(`Action failed: ${String(error)}`)
     } finally {
-      renderConversation(chatLogEl, conversation, pendingConfirmations)
+      rerenderConversation()
+    }
+  })
+
+  stageShellEl.addEventListener('dblclick', (event) => {
+    if (event.target instanceof HTMLElement && event.target.closest('.speech-bubble')) {
+      return
+    }
+
+    event.preventDefault()
+    setUiVisible(!isUiVisible)
+  })
+
+  stageShellEl.addEventListener('pointerdown', async (event) => {
+    if (event.button !== 0 || event.detail > 1) {
+      return
+    }
+
+    if (!window.bonzi) {
+      return
+    }
+
+    if (
+      event.target instanceof HTMLElement &&
+      (event.target.closest('.speech-bubble') || event.target.closest('.command-dock'))
+    ) {
+      return
+    }
+
+    const bounds = await window.bonzi.window.getBounds()
+
+    if (!bounds) {
+      return
+    }
+
+    dragState = {
+      pointerId: event.pointerId,
+      startBounds: {
+        x: bounds.x,
+        y: bounds.y
+      },
+      startScreen: {
+        x: event.screenX,
+        y: event.screenY
+      }
+    }
+
+    stageShellEl.setPointerCapture(event.pointerId)
+  })
+
+  stageShellEl.addEventListener('pointermove', (event) => {
+    if (!dragState || dragState.pointerId !== event.pointerId || !window.bonzi) {
+      return
+    }
+
+    const deltaX = event.screenX - dragState.startScreen.x
+    const deltaY = event.screenY - dragState.startScreen.y
+
+    window.bonzi.window.setPosition(
+      dragState.startBounds.x + deltaX,
+      dragState.startBounds.y + deltaY
+    )
+  })
+
+  const clearDragState = (event: PointerEvent): void => {
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return
+    }
+
+    if (stageShellEl.hasPointerCapture(event.pointerId)) {
+      stageShellEl.releasePointerCapture(event.pointerId)
+    }
+
+    dragState = null
+  }
+
+  stageShellEl.addEventListener('pointerup', clearDragState)
+  stageShellEl.addEventListener('pointercancel', clearDragState)
+
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      setUiVisible(false)
     }
   })
 
@@ -494,6 +624,7 @@ export function renderApp(root: HTMLDivElement): void {
     chatInputEl.disabled = true
     assistantSendButton.disabled = true
     appendSystemMessage(message)
+    syncUiVisibility()
     return
   }
 
@@ -529,4 +660,6 @@ export function renderApp(root: HTMLDivElement): void {
     },
     { once: true }
   )
+
+  syncUiVisibility()
 }

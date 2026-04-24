@@ -13,8 +13,16 @@ const bonziApi = {
       ipcRenderer.invoke('app:get-shell-state')
   },
   window: {
+    getBounds: (): Promise<{
+      x: number
+      y: number
+      width: number
+      height: number
+    } | null> => ipcRenderer.invoke('window:get-bounds'),
     minimize: (): void => ipcRenderer.send('window:minimize'),
-    close: (): void => ipcRenderer.send('window:close')
+    close: (): void => ipcRenderer.send('window:close'),
+    setPosition: (x: number, y: number): void =>
+      ipcRenderer.send('window:set-position', x, y)
   },
   assistant: {
     sendCommand: (

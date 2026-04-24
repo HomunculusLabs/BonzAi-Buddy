@@ -46,6 +46,17 @@ export function registerIpcHandlers(
     BrowserWindow.fromWebContents(event.sender)?.close()
   })
 
+  ipcMain.handle('window:get-bounds', (event) => {
+    return BrowserWindow.fromWebContents(event.sender)?.getBounds() ?? null
+  })
+
+  ipcMain.on('window:set-position', (event, x: number, y: number) => {
+    BrowserWindow.fromWebContents(event.sender)?.setPosition(
+      Math.round(x),
+      Math.round(y)
+    )
+  })
+
   ipcMain.handle(
     'assistant:send-command',
     async (

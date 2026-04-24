@@ -51,6 +51,22 @@ p {
   background: transparent;
 }
 
+.shell--ui-hidden .titlebar,
+.shell--ui-hidden .command-dock {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.shell--ui-hidden .speech-bubble-shell {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.shell--bubble-visible .speech-bubble-shell {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .titlebar {
   position: absolute;
   z-index: 30;
@@ -68,6 +84,7 @@ p {
   box-shadow: none;
   -webkit-app-region: drag;
   user-select: none;
+  transition: opacity 160ms ease;
 }
 
 .titlebar__brand {
@@ -154,6 +171,12 @@ p {
   min-height: 0;
   overflow: hidden;
   background: transparent;
+  cursor: grab;
+  touch-action: none;
+}
+
+.stage-shell:active {
+  cursor: grabbing;
 }
 
 .stage-canvas {
@@ -235,6 +258,7 @@ p {
   width: auto;
   transform: none;
   pointer-events: none;
+  transition: opacity 160ms ease;
 }
 
 .speech-bubble {
@@ -408,6 +432,7 @@ p {
   background: transparent;
   box-shadow: none;
   transform: translateX(-50%);
+  transition: opacity 160ms ease;
 }
 
 .command-dock__top {
