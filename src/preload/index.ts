@@ -4,6 +4,8 @@ import type {
   AssistantActionExecutionResponse,
   AssistantCommandRequest,
   AssistantCommandResponse,
+  AssistantEvent,
+  AssistantMessage,
   ShellState
 } from '../shared/contracts'
 
@@ -32,7 +34,22 @@ const bonziApi = {
     executeAction: (
       request: AssistantActionExecutionRequest
     ): Promise<AssistantActionExecutionResponse> =>
-      ipcRenderer.invoke('assistant:execute-action', request)
+      ipcRenderer.invoke('assistant:execute-action', request),
+    getHistory: (): Promise<AssistantMessage[]> =>
+      ipcRenderer.invoke('assistant:get-history'),
+    resetConversation: (): Promise<void> =>
+      ipcRenderer.invoke('assistant:reset-conversation'),
+    onEvent: (listener: (event: AssistantEvent) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, event: AssistantEvent) => {
+        listener(event)
+      }
+
+      ipcRenderer.on('assistant:event', handler)
+
+      return (): void => {
+        ipcRenderer.off('assistant:event', handler)
+      }
+    }
   }
 }
 

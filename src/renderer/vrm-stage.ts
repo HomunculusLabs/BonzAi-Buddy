@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
 import { VRMAnimationLoaderPlugin } from '@pixiv/three-vrm-animation'
+import type { AssistantEventEmoteId } from '../shared/contracts'
 import { resolveStageAnimationSet } from './vrma-animation-resolver'
 
 interface VrmStageCallbacks {
@@ -12,6 +13,7 @@ interface VrmStageCallbacks {
 export interface VrmStageController {
   dispose: () => void
   load: (assetPath: string) => Promise<void>
+  playBuiltInEmote: (emoteId: AssistantEventEmoteId) => boolean
 }
 
 type AnimationPhase = 'idle' | 'emote' | 'returning'
@@ -100,7 +102,8 @@ export function createVrmStage(
 
   return {
     dispose,
-    load
+    load,
+    playBuiltInEmote
   }
 
   async function load(assetPath: string): Promise<void> {
@@ -175,6 +178,7 @@ export function createVrmStage(
     currentVrm = vrm
 
     VRMUtils.rotateVRM0(vrm)
+    normalizeVrmAppearance(vrm)
 
     vrm.scene.traverse((object) => {
       object.frustumCulled = false
@@ -379,6 +383,23 @@ export function createVrmStage(
     }
   }
 
+  function playBuiltInEmote(emoteId: AssistantEventEmoteId): boolean {
+    if (disposed || !currentAnimationState || !currentVrm) {
+      return false
+    }
+
+    const emote = currentAnimationState.emotes.find(
+      (candidate) => candidate.name === emoteId
+    )
+
+    if (!emote) {
+      return false
+    }
+
+    startEmote(currentAnimationState, emote, animationTimeSeconds)
+    return true
+  }
+
   function startRandomEmote(animationState: VrmAnimationState, elapsed: number): void {
     const emote = pickNextEmote(animationState)
 
@@ -387,6 +408,15 @@ export function createVrmStage(
       return
     }
 
+    startEmote(animationState, emote, elapsed)
+  }
+
+  function startEmote(
+    animationState: VrmAnimationState,
+    emote: EmoteActionState,
+    elapsed: number
+  ): void {
+    animationState.activeEmote?.action.stop()
     emote.action.stop()
     emote.action.reset()
     emote.action.enabled = true
@@ -484,6 +514,67 @@ export function createVrmStage(
     renderer.setSize(width, height, false)
     camera.aspect = width / height
     camera.updateProjectionMatrix()
+  }
+
+  function normalizeVrmAppearance(vrm: VRM): void {
+    vrm.scene.traverse((object) => {
+      if (!(object instanceof THREE.Mesh || object instanceof THREE.SkinnedMesh)) {
+        return
+      }
+
+      object.castShadow = false
+      object.receiveShadow = false
+
+      const materials = Array.isArray(object.material)
+        ? object.material
+        : object.material
+          ? [object.material]
+          : []
+
+      for (const [materialIndex, material] of materials.entries()) {
+        if (!material) {
+          continue
+        }
+
+        const maybeMToon = material as THREE.Material & {
+          forceSinglePass?: boolean
+          isMToonMaterial?: boolean
+          isOutline?: boolean
+          outlineWidthFactor?: number
+          outlineWidthMode?: 'none' | 'worldCoordinates' | 'screenCoordinates'
+        }
+
+        if (maybeMToon.isOutline) {
+          material.transparent = true
+          material.opacity = 0
+          material.colorWrite = false
+          material.depthWrite = false
+          material.needsUpdate = true
+          continue
+        }
+
+        const isPrimaryOpaqueBodySlot =
+          materialIndex === 0 &&
+          materials.length > 1 &&
+          material.opacity >= 1 &&
+          !material.transparent &&
+          material.side === THREE.DoubleSide
+
+        if (isPrimaryOpaqueBodySlot) {
+          material.side = THREE.FrontSide
+          material.depthWrite = true
+          material.needsUpdate = true
+        }
+
+        if (maybeMToon.isMToonMaterial || 'outlineWidthFactor' in maybeMToon) {
+          maybeMToon.isOutline = false
+          maybeMToon.outlineWidthMode = 'none'
+          maybeMToon.outlineWidthFactor = 0
+          maybeMToon.forceSinglePass = true
+          maybeMToon.needsUpdate = true
+        }
+      }
+    })
   }
 
   function disposeUnusedScene(root: THREE.Object3D): void {

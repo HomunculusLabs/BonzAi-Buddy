@@ -54,11 +54,14 @@ export async function resolveStageAnimationSet(
   ])
 
   const idle = idleAsset.clip ?? fallbackClips.idle
-  const emotes = waveAsset.clip
-    ? [waveAsset.clip]
-    : fallbackClips.emotes.length > 0
-      ? fallbackClips.emotes
-      : []
+  const preferredWave =
+    waveAsset.clip ??
+    fallbackClips.emotes.find((clip) => clip.name === 'wave') ??
+    null
+  const emotes = [
+    ...[preferredWave].filter((clip): clip is THREE.AnimationClip => clip !== null),
+    ...fallbackClips.emotes.filter((clip) => clip.name !== 'wave')
+  ]
 
   const clips = [idle, ...emotes]
   const hasLookAtTracks = clips.some((clip) =>
@@ -112,7 +115,7 @@ async function loadPreferredStageClip(
     loader,
     vrm,
     options.vrmaPath,
-    `${options.clipName}-vrma`
+    options.clipName
   )
 
   if (vrmaClip.clip) {
@@ -122,7 +125,7 @@ async function loadPreferredStageClip(
   const mixamoClip = await loadOptionalMixamoClip(
     vrm,
     options.fbxPath,
-    `${options.clipName}-mixamo-fbx`,
+    options.clipName,
     { upperBodyOnly: options.upperBodyOnly ?? false }
   )
 

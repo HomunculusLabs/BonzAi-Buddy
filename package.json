@@ -20,6 +20,10 @@
     "vite": "^7.3.2"
   },
   "dependencies": {
+    "@elizaos/core": "2.0.0-alpha.3",
+    "@elizaos/plugin-eliza-classic": "2.0.0-alpha.3",
+    "@elizaos/plugin-localdb": "2.0.0-alpha.3",
+    "@elizaos/plugin-openai": "2.0.0-alpha.3",
     "@pixiv/three-vrm": "^3.5.2",
     "@pixiv/three-vrm-animation": "^3.5.2",
     "three": "^0.180.0"

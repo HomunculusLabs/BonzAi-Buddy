@@ -1,6 +1,8 @@
 # Bonzi Desktop Companion (MVP)
 
-Electron + Vite + TypeScript desktop companion that renders a VRM avatar in a transparent always-on-top window and routes assistant commands through a typed IPC boundary.
+Electron + Vite + TypeScript desktop companion that renders a VRM avatar in a transparent always-on-top window.
+
+Bonzi now runs an embedded **Eliza runtime** in the Electron main process. The renderer UI (speech bubble/chat/action chips + VRM stage) stays Bonzi-native and talks to main through typed IPC.
 
 ## Requirements
 
@@ -18,7 +20,7 @@ Electron + Vite + TypeScript desktop companion that renders a VRM avatar in a tr
    ```bash
    cp .env.example .env
    ```
-3. Choose provider config in `.env` (see below).
+3. Configure runtime provider in `.env` (see below).
 4. Start dev app:
    ```bash
    npm run dev
@@ -30,6 +32,79 @@ Electron + Vite + TypeScript desktop companion that renders a VRM avatar in a tr
 - `npm run typecheck` — TypeScript checks for main/preload/renderer
 - `npm run build` — production build via `electron-vite`
 - `npm run preview` — preview built app
+
+## Runtime architecture (Bonzi → Eliza)
+
+- Electron main owns one Eliza `AgentRuntime` (`src/main/eliza/runtime-manager.ts`).
+- Runtime conversation history is persisted through `@elizaos/plugin-localdb`.
+- Renderer hydrates chat from `assistant:get-history` and listens to `assistant:event`.
+- Desktop actions remain Bonzi-owned and confirmation-aware (`src/main/assistant.ts`), not direct unrestricted runtime execution.
+- Bonzi does **not** run the full Eliza API server or adopt stock app-companion UI in this migration phase.
+
+## Conversation history persistence
+
+History is runtime-backed and stored under Electron user data:
+
+- `<app.getPath("userData")>/eliza-localdb`
+
+On macOS this is typically under:
+
+- `~/Library/Application Support/bonzi/eliza-localdb`
+
+The renderer loads persisted history on startup. Action chips are still turn-local and not persisted.
+
+## Provider mapping / env behavior
+
+`.env.example` supports these modes via `BONZI_ASSISTANT_PROVIDER`:
+
+- `eliza-classic`
+  - Local Eliza Classic fallback mode.
+- `openai-compatible`
+  - Uses OpenAI-compatible APIs (Z.AI or compatible self-hosted endpoints).
+  - Requires `BONZI_OPENAI_API_KEY`.
+  - Optional overrides:
+    - `BONZI_OPENAI_BASE_URL`
+    - `BONZI_OPENAI_MODEL`
+    - `BONZI_OPENAI_SYSTEM_PROMPT`
+- `mock` (legacy alias)
+  - Accepted for compatibility, but mapped to `eliza-classic` with a warning.
+
+If `openai-compatible` is selected without an API key, Bonzi falls back to `eliza-classic` and reports a warning in shell state/chat.
+
+### Z.AI setup
+
+Use these values in `.env`:
+
+```env
+BONZI_ASSISTANT_PROVIDER=openai-compatible
+BONZI_OPENAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
+BONZI_OPENAI_API_KEY=your-z-ai-api-key
+BONZI_OPENAI_MODEL=GLM-5.1
+```
+
+Supported model examples:
+
+- `GLM-5.1`
+- `GLM-5`
+- `GLM-5-Turbo`
+- `GLM-4.7`
+- `GLM-4.5-air`
+
+## Supported built-in emotes and action model
+
+Current built-in runtime emotes:
+
+- `wave`
+- `happy-bounce`
+
+Current allowlisted desktop actions:
+
+- `report-shell-state`
+- `copy-vrm-asset-path`
+- `minimize-window`
+- `close-window` (confirmation required)
+
+Action flow remains: runtime proposes action metadata → main process validates/normalizes → renderer shows action chip → user confirms where required → main executes allowlisted action.
 
 ## VRM asset behavior
 
@@ -96,60 +171,10 @@ We cannot automate Adobe login or asset downloads, but Bonzi can use Mixamo FBX 
 - This repo ignores local `public/static/animations/*.fbx` and `*.vrma` files by default so user-supplied animation assets are not accidentally committed.
 - General VRM licensing reference: https://vrm.dev/licenses/1.0/pdf/en.pdf
 
-## LLM provider config
-
-`.env.example` supports two provider modes:
-
-- `BONZI_ASSISTANT_PROVIDER=mock`
-  - Offline-safe mock behavior for local testing.
-- `BONZI_ASSISTANT_PROVIDER=openai-compatible`
-  - Use this for Z.AI or any OpenAI-compatible chat/completions API.
-  - Requires `BONZI_OPENAI_API_KEY`.
-  - Optional overrides:
-    - `BONZI_OPENAI_BASE_URL`
-    - `BONZI_OPENAI_MODEL`
-    - `BONZI_OPENAI_SYSTEM_PROMPT`
-
-### Z.AI setup
-
-Use these values in `.env`:
-
-```env
-BONZI_ASSISTANT_PROVIDER=openai-compatible
-BONZI_OPENAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
-BONZI_OPENAI_API_KEY=your-z-ai-api-key
-BONZI_OPENAI_MODEL=GLM-5.1
-```
-
-Supported model examples:
-
-- `GLM-5.1`
-- `GLM-5`
-- `GLM-5-Turbo`
-- `GLM-4.7`
-- `GLM-4.5-air`
-
-If `openai-compatible` is selected without an API key, the app falls back to the mock provider and emits a warning in shell state/chat.
-
-## Pi / local-server extension point
-
-This MVP already supports OpenAI-compatible endpoints via `BONZI_OPENAI_BASE_URL`, including Z.AI. You can also point Bonzi to a Raspberry Pi or LAN-hosted service that implements compatible `/chat/completions` behavior.
-
-For a new provider implementation, extend provider selection in:
-
-- `src/main/assistant.ts` (`selectProvider`, provider factory functions)
-- `src/shared/contracts.ts` (`AssistantProviderKind` if needed)
-
 ## Safety model
 
-Assistant actions are intentionally constrained:
-
-- Responses are normalized to JSON and action proposals are filtered to an allowlist.
-- Executable action types are limited to:
-  - `report-shell-state`
-  - `copy-vrm-asset-path`
-  - `minimize-window`
-  - `close-window`
+- Assistant output is normalized to a JSON envelope.
+- Action proposals are filtered to a strict allowlist.
 - `close-window` requires explicit confirmation before execution.
 - No unrestricted shell command execution is exposed in preload/main IPC.
 
@@ -158,10 +183,3 @@ Assistant actions are intentionally constrained:
 - Companion window is transparent, frameless, always-on-top, and resizable.
 - On macOS, it is configured to be visible across workspaces (including fullscreen spaces) and hides standard traffic-light buttons.
 - Standard macOS lifecycle is respected (`window-all-closed` does not quit app on darwin).
-
-## Validation snapshot
-
-Latest local validation:
-
-- `npm run typecheck` ✅
-- `npm run build` ✅

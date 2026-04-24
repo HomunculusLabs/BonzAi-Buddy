@@ -1,40 +1,34 @@
 import { BrowserWindow, ipcMain } from 'electron'
-import {
-  createAssistantService,
-  type AssistantService
-} from './assistant'
+import type { AssistantService } from './assistant'
 import { buildShellState } from './shell-state'
 import type {
   AssistantActionExecutionRequest,
   AssistantCommandRequest,
+  AssistantMessage,
   ShellState
 } from '../shared/contracts'
+
+interface RegisterIpcHandlersOptions {
+  assistantService: AssistantService
+}
 
 let handlersRegistered = false
 
 export function registerIpcHandlers(
-  getCompanionWindow: () => BrowserWindow | null
+  options: RegisterIpcHandlersOptions
 ): void {
   if (handlersRegistered) {
     return
   }
 
   handlersRegistered = true
-  let assistantService!: AssistantService
-
-  assistantService = createAssistantService({
-    getCompanionWindow,
-    getShellState: (): ShellState =>
-      buildShellState(
-        assistantService.getProviderInfo(),
-        assistantService.getStartupWarnings()
-      )
-  })
+  const { assistantService } = options
 
   ipcMain.handle('app:get-shell-state', (): ShellState => {
     return buildShellState(
       assistantService.getProviderInfo(),
-      assistantService.getStartupWarnings()
+      assistantService.getStartupWarnings(),
+      assistantService.getRuntimeStatus()
     )
   })
 
@@ -76,4 +70,12 @@ export function registerIpcHandlers(
       return assistantService.executeAction(request)
     }
   )
+
+  ipcMain.handle('assistant:get-history', async (): Promise<AssistantMessage[]> => {
+    return assistantService.getHistory()
+  })
+
+  ipcMain.handle('assistant:reset-conversation', async (): Promise<void> => {
+    await assistantService.resetConversation()
+  })
 }

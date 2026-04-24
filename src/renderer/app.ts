@@ -1,7 +1,10 @@
 import type {
   AssistantAction,
   AssistantCommandResponse,
+  AssistantEvent,
+  AssistantEventEmoteId,
   AssistantMessage,
+  AssistantRuntimeStatus,
   ShellState
 } from '../shared/contracts'
 import { createVrmStage } from './vrm-stage'
@@ -12,6 +15,8 @@ const EXAMPLE_COMMANDS = [
   'minimize window',
   'close window'
 ]
+
+const BUBBLE_EXPIRY_MS = 12000
 
 interface ConversationEntry {
   message: AssistantMessage
@@ -64,112 +69,133 @@ function labelForRole(role: AssistantMessage['role']): string {
   }
 }
 
-function getVisibleConversationEntries(
+function getActiveConversationEntry(
   entries: ConversationEntry[]
-): ConversationEntry[] {
-  if (entries.length <= 3) {
-    return entries
+): ConversationEntry | null {
+  if (entries.length === 0) {
+    return null
   }
 
-  const recentEntries = entries.slice(-2)
-  const actionableEntries = entries.filter((entry) =>
-    entry.actions.some((action) => action.status !== 'completed')
-  )
-
-  if (actionableEntries.length === 0) {
-    return entries.slice(-3)
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]
+    if (entry.actions.length > 0 || entry.warnings.length > 0) {
+      return entry
+    }
   }
 
-  const selectedEntries = new Set<ConversationEntry>([
-    ...actionableEntries,
-    ...recentEntries
-  ])
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]
+    if (entry.message.role !== 'user') {
+      return entry
+    }
+  }
 
-  return entries.filter((entry) => selectedEntries.has(entry))
+  return entries[entries.length - 1]
+}
+
+function hasPendingBubbleActions(entry: ConversationEntry | null): boolean {
+  return entry?.actions.some((action) => action.status !== 'completed') ?? false
 }
 
 function renderConversation(
   chatLog: HTMLElement,
   entries: ConversationEntry[],
-  pendingConfirmations: Set<string>
+  pendingConfirmations: Set<string>,
+  options: {
+    isAwaitingAssistant: boolean
+    isUiVisible: boolean
+  }
 ): void {
-  if (entries.length === 0) {
+  if (options.isAwaitingAssistant) {
+    chatLog.dataset.bubbleTone = 'assistant'
+    chatLog.innerHTML = `
+      <article class="bubble-entry bubble-entry--assistant bubble-entry--pending">
+        <p class="bubble-entry__content bubble-entry__content--pending">Bonzi is thinking<span class="typing-dots" aria-hidden="true"></span></p>
+      </article>
+    `
+    return
+  }
+
+  const activeEntry = getActiveConversationEntry(entries)
+
+  if (!activeEntry) {
+    if (!options.isUiVisible) {
+      chatLog.dataset.bubbleTone = 'assistant'
+      chatLog.innerHTML = ''
+      return
+    }
+
+    chatLog.dataset.bubbleTone = 'assistant'
     chatLog.innerHTML = `
       <div class="empty-state">
-        <p>Hi! I’m Bonzi. Give me a command and I’ll answer up here.</p>
-        <p class="muted">Try: ${EXAMPLE_COMMANDS.join(' · ')}</p>
+        <p>Ask Bonzi anything.</p>
+        <p class="muted">${EXAMPLE_COMMANDS.join(' · ')}</p>
       </div>
     `
     return
   }
 
-  chatLog.innerHTML = getVisibleConversationEntries(entries)
-    .map(({ message, actions, warnings }) => {
-      const actionMarkup =
-        actions.length === 0
-          ? ''
-          : `
-            <div class="message-actions">
-              ${actions
-                .map((action) => {
-                  const label =
-                    action.status === 'completed'
-                      ? 'Completed'
-                      : action.requiresConfirmation &&
-                          pendingConfirmations.has(action.id)
-                        ? 'Approve & run'
-                        : action.requiresConfirmation
-                          ? 'Request confirmation'
-                          : 'Run action'
+  const { message, actions, warnings } = activeEntry
+  const actionMarkup =
+    actions.length === 0
+      ? ''
+      : `
+        <div class="message-actions">
+          ${actions
+            .map((action) => {
+              const label =
+                action.status === 'completed'
+                  ? 'Completed'
+                  : action.requiresConfirmation &&
+                      pendingConfirmations.has(action.id)
+                    ? 'Approve & run'
+                    : action.requiresConfirmation
+                      ? 'Request confirmation'
+                      : 'Run action'
 
-                  return `
-                    <div class="action-chip" data-action-card>
-                      <div class="action-chip__copy">
-                        <strong>${escapeHtml(action.title)}</strong>
-                        <p>${escapeHtml(action.description)}</p>
-                        <span class="action-chip__status">${escapeHtml(action.status)}</span>
-                      </div>
-                      <button
-                        class="ghost-button"
-                        type="button"
-                        data-action-id="${escapeHtml(action.id)}"
-                        ${action.status === 'completed' ? 'disabled' : ''}
-                      >
-                        ${escapeHtml(label)}
-                      </button>
-                    </div>
-                  `
-                })
-                .join('')}
-            </div>
-          `
-
-      const warningMarkup = warnings
-        .map(
-          (warning) =>
-            `<p class="message-warning">${escapeHtml(warning)}</p>`
-        )
-        .join('')
-
-      return `
-        <article class="bubble-entry bubble-entry--${escapeHtml(message.role)}">
-          <header class="bubble-entry__meta">
-            <span class="bubble-entry__role">${escapeHtml(
-              labelForRole(message.role)
-            )}</span>
-            <time datetime="${escapeHtml(message.createdAt)}">${escapeHtml(
-              formatTimestamp(message.createdAt)
-            )}</time>
-          </header>
-          <p class="bubble-entry__content">${escapeHtml(message.content)}</p>
-          ${warningMarkup}
-          ${actionMarkup}
-        </article>
+              return `
+                <div class="action-chip" data-action-card>
+                  <div class="action-chip__copy">
+                    <strong>${escapeHtml(action.title)}</strong>
+                    <p>${escapeHtml(action.description)}</p>
+                    <span class="action-chip__status">${escapeHtml(action.status)}</span>
+                  </div>
+                  <button
+                    class="ghost-button"
+                    type="button"
+                    data-action-id="${escapeHtml(action.id)}"
+                    ${action.status === 'completed' ? 'disabled' : ''}
+                  >
+                    ${escapeHtml(label)}
+                  </button>
+                </div>
+              `
+            })
+            .join('')}
+        </div>
       `
-    })
+
+  const warningMarkup = warnings
+    .map(
+      (warning) =>
+        `<p class="message-warning">${escapeHtml(warning)}</p>`
+    )
     .join('')
 
-  chatLog.scrollTop = chatLog.scrollHeight
+  chatLog.dataset.bubbleTone = message.role
+  chatLog.innerHTML = `
+    <article class="bubble-entry bubble-entry--${escapeHtml(message.role)}">
+      <header class="bubble-entry__meta">
+        <span class="bubble-entry__role">${escapeHtml(labelForRole(message.role))}</span>
+        <time datetime="${escapeHtml(message.createdAt)}">${escapeHtml(
+          formatTimestamp(message.createdAt)
+        )}</time>
+      </header>
+      <p class="bubble-entry__content">${escapeHtml(message.content)}</p>
+      ${warningMarkup}
+      ${actionMarkup}
+    </article>
+  `
 }
 
 function createMessage(
@@ -181,6 +207,29 @@ function createMessage(
     role,
     content,
     createdAt: new Date().toISOString()
+  }
+}
+
+function conversationEntriesFromHistory(
+  messages: AssistantMessage[]
+): ConversationEntry[] {
+  return messages.map((message) => ({
+    message,
+    actions: [],
+    warnings: []
+  }))
+}
+
+function shellStageForRuntimeStatus(
+  status: AssistantRuntimeStatus
+): ShellState['stage'] {
+  switch (status.state) {
+    case 'starting':
+      return 'runtime-starting'
+    case 'ready':
+      return 'assistant-ready'
+    case 'error':
+      return 'runtime-error'
   }
 }
 
@@ -198,10 +247,6 @@ function applyActionUpdate(
       return
     }
   }
-}
-
-function conversationHistory(entries: ConversationEntry[]): AssistantMessage[] {
-  return entries.map((entry) => entry.message)
 }
 
 function addAssistantTurn(
@@ -325,28 +370,81 @@ export function renderApp(root: HTMLDivElement): void {
     throw new Error('Renderer shell did not mount expected controls.')
   }
 
+  const setAssistantInputEnabled = (enabled: boolean): void => {
+    chatInputEl.disabled = !enabled
+    assistantSendButton.disabled = !enabled
+  }
+
   let shellState: ShellState | null = null
   const conversation: ConversationEntry[] = []
   const pendingConfirmations = new Set<string>()
   let isUiVisible = false
+  let isAwaitingAssistant = false
+  let isBubbleVisible = false
+  let bubbleExpiryTimer: number | null = null
   let dragState: WindowDragState | null = null
+  let pendingStageEmote: AssistantEventEmoteId | null = null
+  let pendingRuntimeStatus: AssistantRuntimeStatus | null = null
+  let unsubscribeAssistantEvents: (() => void) | null = null
 
-  renderConversation(chatLogEl, conversation, pendingConfirmations)
+  setAssistantInputEnabled(false)
+
+  renderConversation(chatLogEl, conversation, pendingConfirmations, {
+    isAwaitingAssistant,
+    isUiVisible
+  })
+
+  const clearBubbleExpiry = (): void => {
+    if (bubbleExpiryTimer !== null) {
+      window.clearTimeout(bubbleExpiryTimer)
+      bubbleExpiryTimer = null
+    }
+  }
+
+  const refreshBubbleVisibility = (): void => {
+    clearBubbleExpiry()
+
+    if (isAwaitingAssistant) {
+      isBubbleVisible = true
+      return
+    }
+
+    const activeEntry = getActiveConversationEntry(conversation)
+
+    if (!activeEntry) {
+      isBubbleVisible = false
+      return
+    }
+
+    isBubbleVisible = true
+
+    if (isUiVisible || hasPendingBubbleActions(activeEntry)) {
+      return
+    }
+
+    bubbleExpiryTimer = window.setTimeout(() => {
+      if (isUiVisible || isAwaitingAssistant) {
+        return
+      }
+
+      isBubbleVisible = false
+      syncUiVisibility()
+    }, BUBBLE_EXPIRY_MS)
+  }
 
   const syncUiVisibility = (): void => {
-    const hasConversation = conversation.length > 0
     const hasError = !vrmErrorEl.hidden
     shellEl.classList.toggle('shell--ui-hidden', !isUiVisible)
     shellEl.classList.toggle('shell--ui-active', isUiVisible)
     shellEl.classList.toggle(
       'shell--bubble-visible',
-      isUiVisible || hasConversation || hasError
+      isUiVisible || isBubbleVisible || isAwaitingAssistant || hasError
     )
   }
 
   const setUiVisible = (visible: boolean): void => {
     isUiVisible = visible
-    syncUiVisibility()
+    rerenderConversation()
 
     if (visible) {
       window.requestAnimationFrame(() => {
@@ -357,8 +455,62 @@ export function renderApp(root: HTMLDivElement): void {
   }
 
   const rerenderConversation = (): void => {
-    renderConversation(chatLogEl, conversation, pendingConfirmations)
+    renderConversation(chatLogEl, conversation, pendingConfirmations, {
+      isAwaitingAssistant,
+      isUiVisible
+    })
+    refreshBubbleVisibility()
     syncUiVisibility()
+  }
+
+  const hydrateConversation = (messages: AssistantMessage[]): void => {
+    conversation.splice(
+      0,
+      conversation.length,
+      ...conversationEntriesFromHistory(messages)
+    )
+    rerenderConversation()
+  }
+
+  const setProviderLabel = (label: string): void => {
+    providerLabelEl.textContent = label
+    providerPillEl.textContent = label
+  }
+
+  const applyShellState = (state: ShellState): void => {
+    const nextState =
+      pendingRuntimeStatus === null
+        ? state
+        : {
+            ...state,
+            stage: shellStageForRuntimeStatus(pendingRuntimeStatus),
+            assistant: {
+              ...state.assistant,
+              runtime: pendingRuntimeStatus
+            }
+          }
+
+    shellState = nextState
+    shellStateEl.textContent = shellStateMarkup(nextState)
+    vrmPathEl.textContent = nextState.vrmAssetPath
+    setProviderLabel(nextState.assistant.provider.label)
+  }
+
+  const syncRuntimeStatus = (status: AssistantRuntimeStatus): void => {
+    pendingRuntimeStatus = status
+
+    if (!shellState) {
+      return
+    }
+
+    applyShellState({
+      ...shellState,
+      stage: shellStageForRuntimeStatus(status),
+      assistant: {
+        ...shellState.assistant,
+        runtime: status
+      }
+    })
   }
 
   const vrmStage = createVrmStage(vrmCanvas, {
@@ -379,6 +531,32 @@ export function renderApp(root: HTMLDivElement): void {
     }
   })
 
+  const flushPendingStageEmote = (): void => {
+    if (!pendingStageEmote) {
+      return
+    }
+
+    if (vrmStage.playBuiltInEmote(pendingStageEmote)) {
+      pendingStageEmote = null
+    }
+  }
+
+  const handleAssistantEvent = (event: AssistantEvent): void => {
+    switch (event.type) {
+      case 'runtime-status':
+        syncRuntimeStatus(event.status)
+        return
+      case 'play-emote':
+        if (vrmStage.playBuiltInEmote(event.emoteId)) {
+          pendingStageEmote = null
+          return
+        }
+
+        pendingStageEmote = event.emoteId
+        return
+    }
+  }
+
   const loadVrm = async (): Promise<void> => {
     if (!shellState) {
       return
@@ -386,14 +564,10 @@ export function renderApp(root: HTMLDivElement): void {
 
     try {
       await vrmStage.load(shellState.vrmAssetPath)
+      flushPendingStageEmote()
     } catch {
       // UI/error state is already updated inside the stage controller.
     }
-  }
-
-  const setProviderLabel = (label: string): void => {
-    providerLabelEl.textContent = label
-    providerPillEl.textContent = label
   }
 
   const appendSystemMessage = (content: string): void => {
@@ -434,23 +608,20 @@ export function renderApp(root: HTMLDivElement): void {
       return
     }
 
-    const history = conversationHistory(conversation)
     const userMessage = createMessage('user', command)
     conversation.push({
       message: userMessage,
       actions: [],
       warnings: []
     })
+    isAwaitingAssistant = true
     rerenderConversation()
 
     chatInputEl.value = ''
-    chatInputEl.disabled = true
+    setAssistantInputEnabled(false)
 
     try {
-      const response = await window.bonzi.assistant.sendCommand({
-        command,
-        history
-      })
+      const response = await window.bonzi.assistant.sendCommand({ command })
 
       setProviderLabel(response.provider.label)
 
@@ -463,12 +634,15 @@ export function renderApp(root: HTMLDivElement): void {
         )
       }
 
+      isAwaitingAssistant = false
       rerenderConversation()
       setUiVisible(false)
     } catch (error) {
+      isAwaitingAssistant = false
       appendSystemMessage(`Assistant request failed: ${String(error)}`)
     } finally {
-      chatInputEl.disabled = false
+      isAwaitingAssistant = false
+      setAssistantInputEnabled(true)
       if (isUiVisible) {
         chatInputEl.focus()
       }
@@ -628,22 +802,16 @@ export function renderApp(root: HTMLDivElement): void {
     return
   }
 
-  void window.bonzi.app
-    .getShellState()
-    .then(async (state) => {
-      shellState = state
-      shellStateEl.textContent = shellStateMarkup(state)
-      vrmPathEl.textContent = state.vrmAssetPath
-      setProviderLabel(state.assistant.provider.label)
+  unsubscribeAssistantEvents = window.bonzi.assistant.onEvent(handleAssistantEvent)
 
-      if (state.assistant.warnings.length > 0) {
-        appendSystemMessage(state.assistant.warnings.join(' '))
-      }
+  void (async () => {
+    const [shellStateResult, historyResult] = await Promise.allSettled([
+      window.bonzi.app.getShellState(),
+      window.bonzi.assistant.getHistory()
+    ])
 
-      void loadVrm()
-    })
-    .catch((error) => {
-      const message = `Failed to load shell state: ${String(error)}`
+    if (shellStateResult.status === 'rejected') {
+      const message = `Failed to load shell state: ${String(shellStateResult.reason)}`
       shellStateEl.textContent = message
       vrmPathEl.textContent = 'Unavailable'
       vrmStatusEl.textContent = 'VRM failed to initialize'
@@ -651,11 +819,45 @@ export function renderApp(root: HTMLDivElement): void {
       vrmErrorEl.textContent = message
       vrmRetryButton.hidden = true
       appendSystemMessage(message)
-    })
+      return
+    }
+
+    applyShellState(shellStateResult.value)
+
+    if (historyResult.status === 'fulfilled') {
+      hydrateConversation(historyResult.value)
+    } else {
+      appendSystemMessage(
+        `Failed to load assistant history: ${String(historyResult.reason)}`
+      )
+    }
+
+    if (
+      conversation.length === 0 &&
+      shellStateResult.value.assistant.warnings.length > 0
+    ) {
+      appendSystemMessage(shellStateResult.value.assistant.warnings.join(' '))
+    }
+
+    setAssistantInputEnabled(true)
+    void loadVrm()
+  })().catch((error: unknown) => {
+    const message = `Failed to hydrate Bonzi shell: ${String(error)}`
+    shellStateEl.textContent = message
+    vrmPathEl.textContent = 'Unavailable'
+    vrmStatusEl.textContent = 'VRM failed to initialize'
+    vrmErrorEl.hidden = false
+    vrmErrorEl.textContent = message
+    vrmRetryButton.hidden = true
+    appendSystemMessage(message)
+  })
 
   window.addEventListener(
     'beforeunload',
     () => {
+      unsubscribeAssistantEvents?.()
+      unsubscribeAssistantEvents = null
+      clearBubbleExpiry()
       vrmStage.dispose()
     },
     { once: true }

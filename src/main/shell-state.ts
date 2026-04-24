@@ -1,24 +1,45 @@
-import { ASSISTANT_ACTION_TYPES, type AssistantProviderInfo, type ShellState } from '../shared/contracts'
+import {
+  ASSISTANT_ACTION_TYPES,
+  type AssistantProviderInfo,
+  type AssistantRuntimeStatus,
+  type ShellState,
+  type ShellStateStage
+} from '../shared/contracts'
 
 export const VRM_ASSET_PATH = './static/7120171664031727876.vrm'
 
 export function buildShellState(
   provider: AssistantProviderInfo,
-  warnings: string[]
+  warnings: string[],
+  runtime: AssistantRuntimeStatus
 ): ShellState {
   return {
-    stage: 'item-3-assistant-ready',
+    stage: shellStageForRuntime(runtime),
     platform: process.platform,
     vrmAssetPath: VRM_ASSET_PATH,
     notes: [
-      'Item 2 remains live: the renderer still loads the bundled VRM onto the transparent Three.js stage.',
-      'Item 3 is now wired: renderer commands cross a typed IPC bridge into a provider-pluggable assistant service.',
-      'Task execution is intentionally constrained to a small allowlist with confirmation gates for sensitive actions.'
+      'Bonzi now runs an embedded Eliza runtime in the Electron main process.',
+      'Assistant history is persisted locally through the runtime manager, while renderer UI behavior remains unchanged for now.',
+      'Desktop actions remain constrained to Bonzi’s small allowlist, with confirmation still required for sensitive actions like close-window.'
     ],
     assistant: {
       provider,
       availableActions: [...ASSISTANT_ACTION_TYPES],
-      warnings
+      warnings,
+      runtime
     }
+  }
+}
+
+function shellStageForRuntime(
+  runtime: AssistantRuntimeStatus
+): ShellStateStage {
+  switch (runtime.state) {
+    case 'starting':
+      return 'runtime-starting'
+    case 'ready':
+      return 'assistant-ready'
+    case 'error':
+      return 'runtime-error'
   }
 }

@@ -1,8 +1,15 @@
-export type AssistantProviderKind = 'mock' | 'openai-compatible'
+export type AssistantProviderKind = 'eliza-classic' | 'openai-compatible'
 
 export interface AssistantProviderInfo {
   kind: AssistantProviderKind
   label: string
+}
+
+export interface AssistantRuntimeStatus {
+  backend: 'eliza'
+  state: 'starting' | 'ready' | 'error'
+  persistence: 'localdb'
+  lastError?: string
 }
 
 export type AssistantMessageRole = 'user' | 'assistant' | 'system'
@@ -41,7 +48,7 @@ export interface AssistantAction {
 
 export interface AssistantCommandRequest {
   command: string
-  history: AssistantMessage[]
+  history?: AssistantMessage[]
 }
 
 export interface AssistantCommandResponse {
@@ -65,8 +72,19 @@ export interface AssistantActionExecutionResponse {
   confirmationRequired: boolean
 }
 
+export type AssistantEventEmoteId = 'wave' | 'happy-bounce'
+
+export type AssistantEvent =
+  | { type: 'runtime-status'; status: AssistantRuntimeStatus }
+  | { type: 'play-emote'; emoteId: AssistantEventEmoteId }
+
+export type ShellStateStage =
+  | 'runtime-starting'
+  | 'assistant-ready'
+  | 'runtime-error'
+
 export interface ShellState {
-  stage: 'item-3-assistant-ready'
+  stage: ShellStateStage
   platform: string
   vrmAssetPath: string
   notes: string[]
@@ -74,5 +92,6 @@ export interface ShellState {
     provider: AssistantProviderInfo
     availableActions: AssistantActionType[]
     warnings: string[]
+    runtime: AssistantRuntimeStatus
   }
 }

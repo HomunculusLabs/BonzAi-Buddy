@@ -5,6 +5,8 @@ import type {
   AssistantActionExecutionResponse,
   AssistantCommandRequest,
   AssistantCommandResponse,
+  AssistantEvent,
+  AssistantMessage,
   ShellState
 } from '../shared/contracts'
 
@@ -32,6 +34,9 @@ declare global {
         executeAction: (
           request: AssistantActionExecutionRequest
         ) => Promise<AssistantActionExecutionResponse>
+        getHistory: () => Promise<AssistantMessage[]>
+        resetConversation: () => Promise<void>
+        onEvent: (listener: (event: AssistantEvent) => void) => () => void
       }
     }
   }
