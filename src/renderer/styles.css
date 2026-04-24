@@ -67,6 +67,11 @@ p {
   pointer-events: auto;
 }
 
+.shell--ui-hidden:not(.shell--bubble-visible) .stage-shell {
+  top: 24px;
+  bottom: 12px;
+}
+
 .titlebar {
   position: absolute;
   z-index: 30;
