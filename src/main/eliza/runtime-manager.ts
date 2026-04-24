@@ -7,9 +7,11 @@ import {
   createMessageMemory,
   LLMMode,
   stringToUuid,
+  type ActionResult,
   type Content,
   type Memory,
   type Plugin,
+  type ProviderDataRecord,
   type UUID
 } from '@elizaos/core/node'
 import { elizaClassicPlugin } from '@elizaos/plugin-eliza-classic'
@@ -30,6 +32,11 @@ import {
   type BonziElizaResolvedConfig
 } from './config'
 import { createBonziContextPlugin } from './bonzi-context-plugin'
+import {
+  bonziActionTypeFromElizaActionName,
+  createBonziDesktopActionProposal,
+  createBonziDesktopActionsPlugin
+} from './bonzi-desktop-actions-plugin'
 import {
   DEFAULT_ELIZA_EMBEDDING_DIMENSION,
   type ElizaCompatibleEmbeddingDimension
@@ -158,52 +165,60 @@ export class BonziRuntimeManager {
       }
     })
 
-    let parsedTurn: BonziRuntimeTurn = {
-      reply: '',
-      actions: [],
-      warnings: []
-    }
+    const callbackTexts: string[] = []
+    const callbackActions: BonziProposedAction[] = []
 
     const result = await bundle.runtime.messageService.handleMessage(
       bundle.runtime,
       messageMemory,
       async (content: Content) => {
-        parsedTurn = parseBonziAssistantEnvelope(
-          typeof content.text === 'string' ? content.text : ''
-        )
+        const text = normalizeText(content.text)
 
-        if (!parsedTurn.reply) {
-          return []
+        if (text) {
+          callbackTexts.push(text)
         }
 
-        return [
-          createMessageMemory({
-            id: crypto.randomUUID() as UUID,
-            entityId: bundle.runtime.agentId,
-            roomId: bundle.roomId,
-            content: {
-              ...content,
-              text: parsedTurn.reply,
-              source: 'bonzi-electron-main',
-              channelType: ChannelType.DM
-            }
-          })
-        ]
+        callbackActions.push(...extractBonziActionsFromContent(content))
+        return []
       }
     )
 
-    if (!parsedTurn.reply && typeof result.responseContent?.text === 'string') {
-      parsedTurn = parseBonziAssistantEnvelope(result.responseContent.text)
+    const responseContent = result.responseContent ?? undefined
+    const actionResults = bundle.runtime.getActionResults(messageMemory.id as UUID)
+    const responseText = normalizeText(responseContent?.text)
+    const actions = dedupeProposedActions([
+      ...extractBonziActionsFromActionResults(actionResults),
+      ...callbackActions,
+      ...extractBonziActionsFromContent(responseContent)
+    ])
+    const reply =
+      responseText ||
+      callbackTexts.at(-1) ||
+      (actions.length > 0
+        ? 'I prepared that Bonzi action for you.'
+        : 'The runtime returned an empty response.')
+
+    if (!responseText) {
+      await bundle.runtime.createMemory(
+        createMessageMemory({
+          id: crypto.randomUUID() as UUID,
+          entityId: bundle.runtime.agentId,
+          roomId: bundle.roomId,
+          content: {
+            text: reply,
+            source: 'bonzi-electron-main',
+            channelType: ChannelType.DM
+          }
+        }),
+        'messages'
+      )
     }
 
-    if (parsedTurn.emote) {
-      this.emit({
-        type: 'play-emote',
-        emoteId: parsedTurn.emote
-      })
+    return {
+      reply,
+      actions,
+      warnings: []
     }
-
-    return parsedTurn
   }
 
   async dispose(): Promise<void> {
@@ -255,7 +270,7 @@ export class BonziRuntimeManager {
             systemPromptOverride: config.systemPromptOverride
           }),
           plugins: await this.buildPlugins(config),
-          actionPlanning: false,
+          actionPlanning: true,
           llmMode: LLMMode.SMALL
         })
 
@@ -315,14 +330,13 @@ export class BonziRuntimeManager {
   }
 
   private buildE2eTurn(command: string): BonziRuntimeTurn {
-    return parseBonziAssistantEnvelope(
-      JSON.stringify({
-        reply: `E2E assistant reply for: ${command}`,
-        actions: command.toLowerCase().includes('shell')
-          ? [{ type: 'report-shell-state' }]
-          : []
-      })
-    )
+    return {
+      reply: `E2E assistant reply for: ${command}`,
+      actions: command.toLowerCase().includes('shell')
+        ? [createBonziDesktopActionProposal('report-shell-state')]
+        : [],
+      warnings: []
+    }
   }
 
   private async buildPlugins(
@@ -332,7 +346,8 @@ export class BonziRuntimeManager {
       localdbPlugin,
       createBonziContextPlugin({
         getShellState: this.getShellState
-      })
+      }),
+      createBonziDesktopActionsPlugin()
     ]
 
     if (config.effectiveProvider === 'openai-compatible') {
@@ -481,6 +496,10 @@ export class BonziRuntimeManager {
     memory: Memory,
     bundle: RuntimeBundle
   ): AssistantMessage | null {
+    if (memory.content.source === 'action') {
+      return null
+    }
+
     const content = typeof memory.content.text === 'string' ? memory.content.text.trim() : ''
 
     if (!content) {
@@ -512,70 +531,80 @@ export class BonziRuntimeManager {
   }
 }
 
-function parseBonziAssistantEnvelope(content: string): BonziRuntimeTurn {
-  const cleaned = stripCodeFence(content)
+function extractBonziActionsFromContent(
+  content: Content | null | undefined
+): BonziProposedAction[] {
+  const actions = Array.isArray(content?.actions) ? content.actions : []
 
-  try {
-    const parsed = JSON.parse(cleaned) as {
-      reply?: unknown
-      actions?: unknown
-      emote?: unknown
+  return actions.flatMap((actionName) => {
+    const type = bonziActionTypeFromElizaActionName(actionName)
+    return type ? [createBonziDesktopActionProposal(type)] : []
+  })
+}
+
+function extractBonziActionsFromActionResults(
+  results: ActionResult[]
+): BonziProposedAction[] {
+  return results.flatMap((result) => {
+    const proposal = extractBonziActionProposalFromData(result.data)
+
+    if (proposal) {
+      return [proposal]
     }
 
-    return {
-      reply:
-        typeof parsed.reply === 'string' && parsed.reply.trim()
-          ? parsed.reply.trim()
-          : 'The runtime returned JSON without a usable reply.',
-      actions: Array.isArray(parsed.actions)
-        ? sanitizeProposedActions(parsed.actions)
-        : [],
-      warnings: [],
-      emote: isAssistantEventEmoteId(parsed.emote) ? parsed.emote : undefined
-    }
-  } catch {
-    return {
-      reply: content.trim() || 'The runtime returned an empty response.',
-      actions: [],
-      emote: undefined,
-      warnings: [
-        'Runtime returned non-JSON text, so assistant actions were disabled for this turn.'
-      ]
-    }
+    const type = bonziActionTypeFromElizaActionName(result.data?.actionName)
+    return type ? [createBonziDesktopActionProposal(type)] : []
+  })
+}
+
+function extractBonziActionProposalFromData(
+  data: ProviderDataRecord | undefined
+): BonziProposedAction | null {
+  const rawProposal = data?.bonziProposedAction
+
+  if (!isRecord(rawProposal)) {
+    return null
+  }
+
+  const type = rawProposal.type
+
+  if (!isAssistantActionType(type)) {
+    return null
+  }
+
+  const defaults = createBonziDesktopActionProposal(type)
+
+  return {
+    type,
+    title: normalizeText(rawProposal.title) || defaults.title,
+    description: normalizeText(rawProposal.description) || defaults.description,
+    requiresConfirmation:
+      typeof rawProposal.requiresConfirmation === 'boolean'
+        ? rawProposal.requiresConfirmation
+        : defaults.requiresConfirmation
   }
 }
 
-function sanitizeProposedActions(actions: unknown[]): BonziProposedAction[] {
+function dedupeProposedActions(
+  actions: BonziProposedAction[]
+): BonziProposedAction[] {
   const seen = new Set<AssistantActionType>()
+  const deduped: BonziProposedAction[] = []
 
-  return actions.flatMap((action) => {
-    if (!isRecord(action)) {
-      return []
+  for (const action of actions) {
+    if (seen.has(action.type)) {
+      continue
     }
 
-    const type = action.type
+    seen.add(action.type)
+    deduped.push(action)
+  }
 
-    if (!isAssistantActionType(type) || seen.has(type)) {
-      return []
-    }
+  return deduped
+}
 
-    seen.add(type)
-
-    return [
-      {
-        type,
-        title: typeof action.title === 'string' ? action.title : undefined,
-        description:
-          typeof action.description === 'string'
-            ? action.description
-            : undefined,
-        requiresConfirmation:
-          typeof action.requiresConfirmation === 'boolean'
-            ? action.requiresConfirmation
-            : undefined
-      }
-    ]
-  })
+function normalizeText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
 }
 
 function isAssistantActionType(value: unknown): value is AssistantActionType {
@@ -585,22 +614,8 @@ function isAssistantActionType(value: unknown): value is AssistantActionType {
   )
 }
 
-function isAssistantEventEmoteId(value: unknown): value is AssistantEventEmoteId {
-  return value === 'wave' || value === 'happy-bounce'
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
-}
-
-function stripCodeFence(content: string): string {
-  const trimmed = content.trim()
-
-  if (!trimmed.startsWith('```')) {
-    return trimmed
-  }
-
-  return trimmed.replace(/^```(?:json)?\s*/u, '').replace(/\s*```$/u, '')
 }
 
 function normalizeTimestamp(value: unknown): string {

@@ -26,6 +26,12 @@ declare global {
         minimize: () => void
         close: () => void
         setPosition: (x: number, y: number) => void
+        setBounds: (bounds: {
+          x: number
+          y: number
+          width: number
+          height: number
+        }) => void
       }
       assistant: {
         sendCommand: (

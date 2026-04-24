@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { BrowserWindow, ipcMain, screen } from 'electron'
 import type { AssistantService } from './assistant'
 import { buildShellState } from './shell-state'
 import type {
@@ -13,6 +13,20 @@ interface RegisterIpcHandlersOptions {
 }
 
 let handlersRegistered = false
+
+function areFiniteBounds(bounds: {
+  x: number
+  y: number
+  width: number
+  height: number
+}): boolean {
+  return (
+    Number.isFinite(bounds.x) &&
+    Number.isFinite(bounds.y) &&
+    Number.isFinite(bounds.width) &&
+    Number.isFinite(bounds.height)
+  )
+}
 
 export function registerIpcHandlers(
   options: RegisterIpcHandlersOptions
@@ -50,6 +64,41 @@ export function registerIpcHandlers(
       Math.round(y)
     )
   })
+
+  ipcMain.on(
+    'window:set-bounds',
+    (
+      event,
+      bounds: {
+        x: number
+        y: number
+        width: number
+        height: number
+      }
+    ) => {
+      const targetWindow = BrowserWindow.fromWebContents(event.sender)
+
+      if (!targetWindow || !areFiniteBounds(bounds)) {
+        return
+      }
+
+      const currentBounds = targetWindow.getBounds()
+      const display = screen.getDisplayMatching(currentBounds)
+      const { workArea } = display
+      const width = Math.max(320, Math.round(bounds.width))
+      const height = Math.min(
+        workArea.height,
+        Math.max(480, Math.round(bounds.height))
+      )
+      const x = Math.round(bounds.x)
+      const y = Math.max(
+        workArea.y,
+        Math.min(Math.round(bounds.y), workArea.y + workArea.height - height)
+      )
+
+      targetWindow.setBounds({ x, y, width, height })
+    }
+  )
 
   ipcMain.handle(
     'assistant:send-command',

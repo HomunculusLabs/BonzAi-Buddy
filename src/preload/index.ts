@@ -24,7 +24,13 @@ const bonziApi = {
     minimize: (): void => ipcRenderer.send('window:minimize'),
     close: (): void => ipcRenderer.send('window:close'),
     setPosition: (x: number, y: number): void =>
-      ipcRenderer.send('window:set-position', x, y)
+      ipcRenderer.send('window:set-position', x, y),
+    setBounds: (bounds: {
+      x: number
+      y: number
+      width: number
+      height: number
+    }): void => ipcRenderer.send('window:set-bounds', bounds)
   },
   assistant: {
     sendCommand: (

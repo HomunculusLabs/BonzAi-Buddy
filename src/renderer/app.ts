@@ -17,6 +17,11 @@ const EXAMPLE_COMMANDS = [
 ]
 
 const BUBBLE_EXPIRY_MS = 12000
+const BASE_WINDOW_HEIGHT = 640
+const BUBBLE_WINDOW_TOP_MARGIN = 16
+const BUBBLE_WINDOW_BOTTOM_SPACE = 356
+const BUBBLE_TAIL_HEIGHT = 18
+const WINDOW_RESIZE_EPSILON = 4
 
 interface ConversationEntry {
   message: AssistantMessage
@@ -395,6 +400,7 @@ export function renderApp(root: HTMLDivElement): void {
   let pendingStageEmote: AssistantEventEmoteId | null = null
   let pendingRuntimeStatus: AssistantRuntimeStatus | null = null
   let unsubscribeAssistantEvents: (() => void) | null = null
+  let bubbleResizeFrame: number | null = null
 
   setAssistantInputEnabled(false)
   setAppReadyState('loading')
@@ -439,6 +445,7 @@ export function renderApp(root: HTMLDivElement): void {
 
       isBubbleVisible = false
       syncUiVisibility()
+      syncWindowBoundsToBubble()
     }, BUBBLE_EXPIRY_MS)
   }
 
@@ -450,6 +457,81 @@ export function renderApp(root: HTMLDivElement): void {
       'shell--bubble-visible',
       isUiVisible || isBubbleVisible || isAwaitingAssistant || hasError
     )
+  }
+
+  const syncWindowBoundsToBubble = (): void => {
+    if (!window.bonzi) {
+      return
+    }
+
+    if (bubbleResizeFrame !== null) {
+      window.cancelAnimationFrame(bubbleResizeFrame)
+    }
+
+    bubbleResizeFrame = window.requestAnimationFrame(() => {
+      bubbleResizeFrame = null
+      void resizeWindowToFitBubble()
+    })
+  }
+
+  const resizeWindowToFitBubble = async (): Promise<void> => {
+    if (!window.bonzi) {
+      return
+    }
+
+    const bounds = await window.bonzi.window.getBounds()
+
+    if (!bounds) {
+      return
+    }
+
+    const contentEl = chatLogEl.querySelector<HTMLElement>(
+      '.bubble-entry__content'
+    )
+    contentEl?.classList.remove('bubble-entry__content--scrollable')
+    contentEl?.style.removeProperty('max-height')
+
+    const hasVisibleBubble =
+      isUiVisible || isBubbleVisible || isAwaitingAssistant || !vrmErrorEl.hidden
+    const visibleBubbleHeight = hasVisibleBubble
+      ? Math.ceil(chatLogEl.scrollHeight + BUBBLE_TAIL_HEIGHT)
+      : 0
+    const reservedBubbleSpace =
+      BUBBLE_WINDOW_TOP_MARGIN + BUBBLE_WINDOW_BOTTOM_SPACE
+    const maxWindowHeight = Math.max(
+      BASE_WINDOW_HEIGHT,
+      Math.floor(window.screen.availHeight || BASE_WINDOW_HEIGHT)
+    )
+    let desiredHeight = Math.max(
+      BASE_WINDOW_HEIGHT,
+      visibleBubbleHeight + reservedBubbleSpace
+    )
+
+    if (desiredHeight > maxWindowHeight && contentEl) {
+      const nonContentHeight = Math.max(
+        0,
+        visibleBubbleHeight - contentEl.scrollHeight
+      )
+      const maxContentHeight = Math.max(
+        96,
+        maxWindowHeight - reservedBubbleSpace - nonContentHeight
+      )
+      contentEl.style.maxHeight = `${maxContentHeight}px`
+      contentEl.classList.add('bubble-entry__content--scrollable')
+      desiredHeight = maxWindowHeight
+    }
+
+    if (Math.abs(bounds.height - desiredHeight) < WINDOW_RESIZE_EPSILON) {
+      return
+    }
+
+    const bottom = bounds.y + bounds.height
+    window.bonzi.window.setBounds({
+      x: bounds.x,
+      y: bottom - desiredHeight,
+      width: bounds.width,
+      height: desiredHeight
+    })
   }
 
   const setUiVisible = (visible: boolean): void => {
@@ -471,6 +553,7 @@ export function renderApp(root: HTMLDivElement): void {
     })
     refreshBubbleVisibility()
     syncUiVisibility()
+    syncWindowBoundsToBubble()
   }
 
   const hydrateConversation = (messages: AssistantMessage[]): void => {
@@ -897,10 +980,15 @@ export function renderApp(root: HTMLDivElement): void {
       unsubscribeAssistantEvents?.()
       unsubscribeAssistantEvents = null
       clearBubbleExpiry()
+      if (bubbleResizeFrame !== null) {
+        window.cancelAnimationFrame(bubbleResizeFrame)
+        bubbleResizeFrame = null
+      }
       vrmStage.dispose()
     },
     { once: true }
   )
 
   syncUiVisibility()
+  syncWindowBoundsToBubble()
 }
