@@ -223,14 +223,12 @@ export function renderApp(root: HTMLDivElement): void {
       </header>
 
       <section class="stage-card">
-        <div class="stage-card__copy">
-          <div class="status-row">
-            <span class="status-pill" data-vrm-status>Preparing renderer…</span>
-            <span class="status-pill status-pill--subtle" data-provider-label>Loading provider…</span>
-            <button class="ghost-button" data-role="vrm-retry" type="button" hidden>
-              Retry load
-            </button>
-          </div>
+        <div class="stage-card__copy" aria-live="polite">
+          <span class="sr-only" data-vrm-status>Preparing renderer…</span>
+          <span class="sr-only" data-provider-label>Loading provider…</span>
+          <button class="ghost-button" data-role="vrm-retry" type="button" hidden>
+            Retry load
+          </button>
           <p class="muted stage-card__error" data-vrm-error hidden></p>
         </div>
 
@@ -239,18 +237,13 @@ export function renderApp(root: HTMLDivElement): void {
         </div>
 
         <div class="stage-shell">
-          <div class="stage-shell__glow" aria-hidden="true"></div>
           <canvas class="stage-canvas" data-vrm-canvas aria-label="Bonzi VRM stage"></canvas>
         </div>
       </section>
 
       <section class="command-dock" aria-label="Assistant command launcher">
-        <div class="command-dock__top">
-          <div>
-            <p class="command-dock__label">Talk to Bonzi</p>
-            <p class="command-dock__hint">Examples: ${EXAMPLE_COMMANDS.join(' · ')}</p>
-          </div>
-          <span class="status-pill status-pill--subtle" data-provider-pill>Awaiting state…</span>
+        <div class="debug-readouts" hidden>
+          <span data-provider-pill>Awaiting state…</span>
         </div>
 
         <form class="chat-form chat-form--dock" data-chat-form>

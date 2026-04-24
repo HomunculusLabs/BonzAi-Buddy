@@ -62,11 +62,10 @@ p {
   justify-content: space-between;
   min-height: 38px;
   padding: 5px 6px 5px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 0;
   border-radius: 16px;
-  background: rgba(12, 13, 20, 0.52);
-  backdrop-filter: blur(18px);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.24);
+  background: transparent;
+  box-shadow: none;
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -143,9 +142,7 @@ p {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 50% 80%, rgba(105, 134, 255, 0.18), transparent 34%),
-    linear-gradient(180deg, rgba(7, 8, 13, 0.08), rgba(7, 8, 13, 0.2));
+  background: transparent;
 }
 
 .stage-shell {
@@ -157,18 +154,6 @@ p {
   min-height: 0;
   overflow: hidden;
   background: transparent;
-}
-
-.stage-shell__glow {
-  position: absolute;
-  left: 18%;
-  right: 18%;
-  bottom: 18px;
-  height: 32%;
-  border-radius: 999px;
-  background: radial-gradient(circle, rgba(132, 164, 255, 0.34), rgba(132, 164, 255, 0));
-  filter: blur(18px);
-  pointer-events: none;
 }
 
 .stage-canvas {
@@ -418,11 +403,10 @@ p {
   bottom: 8px;
   width: min(760px, calc(100vw - 16px));
   padding: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 0;
   border-radius: 18px;
-  background: rgba(12, 13, 20, 0.66);
-  backdrop-filter: blur(18px);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.26);
+  background: transparent;
+  box-shadow: none;
   transform: translateX(-50%);
 }
 
