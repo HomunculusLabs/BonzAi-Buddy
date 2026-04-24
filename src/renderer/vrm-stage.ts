@@ -1,16 +1,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import {
-  VRM,
-  VRMHumanBoneName,
-  VRMLoaderPlugin,
-  VRMUtils
-} from '@pixiv/three-vrm'
-
-interface IdleBoneState {
-  bone: THREE.Object3D
-  baseQuaternion: THREE.Quaternion
-}
+import { VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
+import { createAuthoredVrmClips } from './vrm-animation-clips'
 
 interface VrmStageCallbacks {
   onStatusChange?: (message: string) => void
@@ -22,8 +13,31 @@ export interface VrmStageController {
   load: (assetPath: string) => Promise<void>
 }
 
+type AnimationPhase = 'idle' | 'emote' | 'returning'
+
+interface EmoteActionState {
+  action: THREE.AnimationAction
+  duration: number
+  name: string
+}
+
+interface VrmAnimationState {
+  activeEmote: EmoteActionState | null
+  emotes: EmoteActionState[]
+  idleAction: THREE.AnimationAction
+  lastEmoteName: string | null
+  mixer: THREE.AnimationMixer
+  nextEmoteAt: number
+  phase: AnimationPhase
+  returnAt: number
+  returnEndAt: number
+}
+
 const MIN_HEIGHT = 1.45
 const MAX_PIXEL_RATIO = 2
+const EMOTE_FADE_SECONDS = 0.55
+const MIN_EMOTE_INTERVAL_SECONDS = 5.4
+const MAX_EMOTE_INTERVAL_SECONDS = 8.8
 
 export function createVrmStage(
   canvas: HTMLCanvasElement,
@@ -46,9 +60,8 @@ export function createVrmStage(
   const subjectCenter = new THREE.Vector3(0, 1.1, 0)
   const subjectSize = new THREE.Vector3(0.8, 1.6, 0.7)
   const desiredLookTarget = new THREE.Vector3(0, 1.35, 0)
-  const headWorldPosition = new THREE.Vector3()
-  const euler = new THREE.Euler(0, 0, 0, 'YXZ')
-  const quaternion = new THREE.Quaternion()
+  const rootBasePosition = new THREE.Vector3()
+  const rootBaseRotation = new THREE.Euler()
   const lights = createLights()
   const resizeObserver = new ResizeObserver(() => {
     resizeRenderer()
@@ -57,12 +70,11 @@ export function createVrmStage(
 
   let animationFrameId = 0
   let activeLoadId = 0
+  let animationTimeSeconds = 0
   let disposed = false
-  let currentVrm: VRM | null = null
+  let currentAnimationState: VrmAnimationState | null = null
   let currentRootHeight = MIN_HEIGHT
-  let rootBaseY = 0
-  let rootBaseRotationY = 0
-  let idleBones: Partial<Record<'chest' | 'neck' | 'head', IdleBoneState>> = {}
+  let currentVrm: VRM | null = null
 
   scene.add(pointerTarget)
   scene.add(lights.hemisphere, lights.key, lights.rim)
@@ -116,6 +128,7 @@ export function createVrmStage(
       })
 
       if (disposed || loadId !== activeLoadId) {
+        disposeUnusedScene(gltf.scene)
         return
       }
 
@@ -126,7 +139,9 @@ export function createVrmStage(
       }
 
       finalizeLoadedVrm(vrm)
-      callbacks.onStatusChange?.('VRM ready — move your cursor over Bonzi.')
+      callbacks.onStatusChange?.(
+        'VRM ready — Bonzi is idling, emoting, and tracking your cursor.'
+      )
     } catch (error) {
       if (disposed || loadId !== activeLoadId) {
         return
@@ -160,12 +175,50 @@ export function createVrmStage(
       vrm.lookAt.target = pointerTarget
     }
 
+    currentAnimationState = createAnimationState(vrm, animationTimeSeconds)
+    currentAnimationState.mixer.update(0)
+    vrm.update(0)
+
     currentRootHeight = captureSubjectMetrics(vrm)
-    captureIdleBoneStates(vrm)
-    rootBaseY = vrm.scene.position.y
-    rootBaseRotationY = vrm.scene.rotation.y
+    rootBasePosition.copy(vrm.scene.position)
+    rootBaseRotation.copy(vrm.scene.rotation)
 
     frameSubject()
+  }
+
+  function createAnimationState(vrm: VRM, elapsed: number): VrmAnimationState {
+    const clips = createAuthoredVrmClips(vrm)
+    const mixer = new THREE.AnimationMixer(vrm.scene)
+    const idleAction = mixer.clipAction(clips.idle)
+
+    idleAction.enabled = true
+    idleAction.setLoop(THREE.LoopRepeat, Infinity)
+    idleAction.play()
+
+    const emotes = clips.emotes.map((clip) => {
+      const action = mixer.clipAction(clip)
+      action.enabled = false
+      action.clampWhenFinished = true
+      action.setLoop(THREE.LoopOnce, 1)
+
+      return {
+        action,
+        duration: clip.duration,
+        name: clip.name
+      }
+    })
+
+    return {
+      activeEmote: null,
+      emotes,
+      idleAction,
+      lastEmoteName: null,
+      mixer,
+      nextEmoteAt: scheduleNextEmoteAt(elapsed),
+      phase: 'idle',
+      returnAt: Number.POSITIVE_INFINITY,
+      returnEndAt: Number.POSITIVE_INFINITY
+    }
   }
 
   function captureSubjectMetrics(vrm: VRM): number {
@@ -183,37 +236,6 @@ export function createVrmStage(
     return Math.max(subjectSize.y, MIN_HEIGHT)
   }
 
-  function captureIdleBoneStates(vrm: VRM): void {
-    idleBones = {
-      chest: getIdleBone(
-        vrm,
-        VRMHumanBoneName.UpperChest,
-        VRMHumanBoneName.Chest,
-        VRMHumanBoneName.Spine
-      ),
-      neck: getIdleBone(vrm, VRMHumanBoneName.Neck),
-      head: getIdleBone(vrm, VRMHumanBoneName.Head)
-    }
-  }
-
-  function getIdleBone(
-    vrm: VRM,
-    ...boneNames: Array<(typeof VRMHumanBoneName)[keyof typeof VRMHumanBoneName]>
-  ): IdleBoneState | undefined {
-    for (const boneName of boneNames) {
-      const bone = vrm.humanoid.getNormalizedBoneNode(boneName)
-
-      if (bone) {
-        return {
-          bone,
-          baseQuaternion: bone.quaternion.clone()
-        }
-      }
-    }
-
-    return undefined
-  }
-
   function frameSubject(): void {
     const width = Math.max(canvas.clientWidth, 1)
     const height = Math.max(canvas.clientHeight, 1)
@@ -228,18 +250,18 @@ export function createVrmStage(
       return
     }
 
-    const focusY = subjectCenter.y + currentRootHeight * 0.13
+    const focusY = subjectCenter.y + currentRootHeight * 0.44
     const halfVerticalFov = THREE.MathUtils.degToRad(camera.fov * 0.5)
     const halfHorizontalFov = Math.atan(Math.tan(halfVerticalFov) * camera.aspect)
-    const fitHeightDistance = (currentRootHeight * 0.58) / Math.tan(halfVerticalFov)
+    const fitHeightDistance = (currentRootHeight * 0.66) / Math.tan(halfVerticalFov)
     const fitWidthDistance =
-      (Math.max(subjectSize.x, 0.75) * 0.72) / Math.tan(halfHorizontalFov)
-    const distance = Math.max(fitHeightDistance, fitWidthDistance) + subjectSize.z * 1.2
+      (Math.max(subjectSize.x, 0.75) * 0.78) / Math.tan(halfHorizontalFov)
+    const distance = Math.max(fitHeightDistance, fitWidthDistance) + subjectSize.z * 1.18
 
     cameraTarget.set(subjectCenter.x, focusY, subjectCenter.z)
     camera.position.set(
       subjectCenter.x + 0.04,
-      subjectCenter.y + currentRootHeight * 0.55,
+      subjectCenter.y + currentRootHeight * 0.62,
       subjectCenter.z + distance
     )
     camera.lookAt(cameraTarget)
@@ -271,13 +293,15 @@ export function createVrmStage(
       animationFrameId = window.requestAnimationFrame(tick)
 
       const delta = Math.min(clock.getDelta(), 1 / 20)
-      const elapsed = clock.elapsedTime
+      animationTimeSeconds += delta
 
       pointerNdc.lerp(desiredPointerNdc, 1 - Math.exp(-delta * 10))
       updatePointerTarget(delta)
 
       if (currentVrm) {
-        applyIdleMotion(currentVrm, elapsed)
+        updateAnimationState(animationTimeSeconds)
+        currentAnimationState?.mixer.update(delta)
+        applyCursorReaction(currentVrm, delta)
         currentVrm.update(delta)
       }
 
@@ -293,53 +317,139 @@ export function createVrmStage(
 
     desiredLookTarget.set(
       cameraTarget.x + pointerNdc.x * lateralRange,
-      cameraTarget.y + currentRootHeight * 0.16 + pointerNdc.y * verticalRange,
+      cameraTarget.y - currentRootHeight * 0.1 + pointerNdc.y * verticalRange,
       camera.position.z - currentRootHeight * 0.34
     )
 
     pointerTarget.position.lerp(desiredLookTarget, 1 - Math.exp(-delta * 12))
   }
 
-  function applyIdleMotion(vrm: VRM, elapsed: number): void {
-    const bobOffset = Math.sin(elapsed * 1.4) * currentRootHeight * 0.008
-    const swayOffset = Math.sin(elapsed * 0.6) * 0.06 + pointerNdc.x * 0.04
-
-    vrm.scene.position.y = rootBaseY + bobOffset
-    vrm.scene.rotation.y = rootBaseRotationY + swayOffset
-
-    applyBoneOffset(
-      idleBones.chest,
-      Math.sin(elapsed * 1.4 + 0.25) * 0.025,
-      pointerNdc.x * 0.05,
-      Math.sin(elapsed * 0.7) * 0.015
-    )
-    applyBoneOffset(
-      idleBones.neck,
-      Math.sin(elapsed * 1.1 + 0.7) * 0.012 + pointerNdc.y * 0.04,
-      pointerNdc.x * 0.055,
-      0
-    )
-    applyBoneOffset(
-      idleBones.head,
-      Math.sin(elapsed * 0.9 + 1.25) * 0.01 + pointerNdc.y * 0.02,
-      pointerNdc.x * 0.03,
-      0
-    )
-  }
-
-  function applyBoneOffset(
-    idleBone: IdleBoneState | undefined,
-    x: number,
-    y: number,
-    z: number
-  ): void {
-    if (!idleBone) {
+  function updateAnimationState(elapsed: number): void {
+    if (!currentAnimationState) {
       return
     }
 
-    idleBone.bone.quaternion.copy(idleBone.baseQuaternion)
-    quaternion.setFromEuler(euler.set(x, y, z, 'YXZ'))
-    idleBone.bone.quaternion.multiply(quaternion)
+    if (
+      currentAnimationState.phase === 'idle' &&
+      elapsed >= currentAnimationState.nextEmoteAt
+    ) {
+      startRandomEmote(currentAnimationState, elapsed)
+      return
+    }
+
+    if (
+      currentAnimationState.phase === 'emote' &&
+      currentAnimationState.activeEmote &&
+      elapsed >= currentAnimationState.returnAt
+    ) {
+      beginReturnToIdle(currentAnimationState, elapsed)
+      return
+    }
+
+    if (
+      currentAnimationState.phase === 'returning' &&
+      currentAnimationState.activeEmote &&
+      elapsed >= currentAnimationState.returnEndAt
+    ) {
+      finishReturningEmote(currentAnimationState, elapsed)
+    }
+  }
+
+  function startRandomEmote(animationState: VrmAnimationState, elapsed: number): void {
+    const emote = pickNextEmote(animationState)
+
+    if (!emote) {
+      animationState.nextEmoteAt = scheduleNextEmoteAt(elapsed)
+      return
+    }
+
+    emote.action.stop()
+    emote.action.reset()
+    emote.action.enabled = true
+    emote.action.clampWhenFinished = true
+    emote.action.setLoop(THREE.LoopOnce, 1)
+    emote.action.play()
+
+    animationState.idleAction.enabled = true
+    animationState.idleAction.play()
+    animationState.idleAction.crossFadeTo(emote.action, EMOTE_FADE_SECONDS, false)
+
+    animationState.activeEmote = emote
+    animationState.lastEmoteName = emote.name
+    animationState.phase = 'emote'
+    animationState.returnAt =
+      elapsed + Math.max(emote.duration * 0.55, emote.duration - EMOTE_FADE_SECONDS - 0.05)
+    animationState.returnEndAt = Number.POSITIVE_INFINITY
+    animationState.nextEmoteAt = Number.POSITIVE_INFINITY
+  }
+
+  function beginReturnToIdle(animationState: VrmAnimationState, elapsed: number): void {
+    const activeEmote = animationState.activeEmote
+
+    if (!activeEmote) {
+      animationState.phase = 'idle'
+      animationState.returnAt = Number.POSITIVE_INFINITY
+      animationState.nextEmoteAt = scheduleNextEmoteAt(elapsed)
+      return
+    }
+
+    animationState.idleAction.enabled = true
+    animationState.idleAction.play()
+    activeEmote.action.crossFadeTo(animationState.idleAction, EMOTE_FADE_SECONDS, false)
+
+    animationState.phase = 'returning'
+    animationState.returnAt = Number.POSITIVE_INFINITY
+    animationState.returnEndAt = elapsed + EMOTE_FADE_SECONDS
+  }
+
+  function finishReturningEmote(animationState: VrmAnimationState, elapsed: number): void {
+    animationState.activeEmote?.action.stop()
+    animationState.activeEmote = null
+    animationState.phase = 'idle'
+    animationState.returnAt = Number.POSITIVE_INFINITY
+    animationState.returnEndAt = Number.POSITIVE_INFINITY
+    animationState.nextEmoteAt = scheduleNextEmoteAt(elapsed)
+  }
+
+  function pickNextEmote(animationState: VrmAnimationState): EmoteActionState | null {
+    if (animationState.emotes.length === 0) {
+      return null
+    }
+
+    const candidates = animationState.emotes.filter(
+      (emote) =>
+        animationState.emotes.length === 1 || emote.name !== animationState.lastEmoteName
+    )
+    const pool = candidates.length > 0 ? candidates : animationState.emotes
+    const index = Math.floor(Math.random() * pool.length)
+
+    return pool[index] ?? null
+  }
+
+  function scheduleNextEmoteAt(elapsed: number): number {
+    return (
+      elapsed +
+      THREE.MathUtils.randFloat(
+        MIN_EMOTE_INTERVAL_SECONDS,
+        MAX_EMOTE_INTERVAL_SECONDS
+      )
+    )
+  }
+
+  function applyCursorReaction(vrm: VRM, delta: number): void {
+    const positionLerp = 1 - Math.exp(-delta * 8)
+    const rotationLerp = 1 - Math.exp(-delta * 9)
+    const targetX = rootBasePosition.x + pointerNdc.x * currentRootHeight * 0.025
+    const targetY = rootBasePosition.y + pointerNdc.y * currentRootHeight * 0.01
+    const targetRotX = rootBaseRotation.x + pointerNdc.y * 0.035
+    const targetRotY = rootBaseRotation.y + pointerNdc.x * 0.07
+    const targetRotZ = rootBaseRotation.z - pointerNdc.x * 0.02
+
+    vrm.scene.position.x = THREE.MathUtils.lerp(vrm.scene.position.x, targetX, positionLerp)
+    vrm.scene.position.y = THREE.MathUtils.lerp(vrm.scene.position.y, targetY, positionLerp)
+    vrm.scene.rotation.x = THREE.MathUtils.lerp(vrm.scene.rotation.x, targetRotX, rotationLerp)
+    vrm.scene.rotation.y = THREE.MathUtils.lerp(vrm.scene.rotation.y, targetRotY, rotationLerp)
+    vrm.scene.rotation.z = THREE.MathUtils.lerp(vrm.scene.rotation.z, targetRotZ, rotationLerp)
   }
 
   function resizeRenderer(): void {
@@ -352,19 +462,30 @@ export function createVrmStage(
     camera.updateProjectionMatrix()
   }
 
+  function disposeUnusedScene(root: THREE.Object3D): void {
+    root.removeFromParent()
+    VRMUtils.deepDispose(root)
+  }
+
   function clearCurrentVrm(): void {
+    if (currentAnimationState && currentVrm) {
+      currentAnimationState.mixer.stopAllAction()
+      currentAnimationState.mixer.uncacheRoot(currentVrm.scene)
+    }
+
+    currentAnimationState = null
+
     if (!currentVrm) {
-      idleBones = {}
+      currentRootHeight = MIN_HEIGHT
       return
     }
 
     currentVrm.lookAt?.reset()
 
-    currentVrm.scene.getWorldPosition(headWorldPosition)
     scene.remove(currentVrm.scene)
     VRMUtils.deepDispose(currentVrm.scene)
     currentVrm = null
-    idleBones = {}
+    currentRootHeight = MIN_HEIGHT
   }
 
   function onPointerMove(event: PointerEvent): void {

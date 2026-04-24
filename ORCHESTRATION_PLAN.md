@@ -7,6 +7,52 @@
 - Preferred MVP stack: Electron + Vite + TypeScript + Three.js + `@pixiv/three-vrm`, because it is fast to scaffold, macOS-friendly, and supports transparent/always-on-top desktop windows. Tauri is a future optimization option.
 - "Pi" interpretation: keep the assistant backend provider-pluggable so it can later point to a Raspberry Pi or local network service; MVP should work locally with env-configured OpenAI-compatible endpoint or mock provider.
 
+## Animation Pass — Current Work
+
+### [x] Animation Item 1 — Procedural playful VRM animation
+Goal: Make the avatar stop looking like a static T-pose by adding procedural animation/posing in `src/renderer/vrm-stage.ts`.
+Done when:
+- Arms are lowered/posed away from the T-pose after VRM load.
+- There is visible idle motion beyond tiny bobbing: breathing, sway, head/neck movement, and at least one playful periodic gesture such as wave/bounce/arm wiggle.
+- Cursor reaction still works and does not fight the animation.
+- Existing provider/chat UI and preload bridge behavior remain unchanged.
+- `npm run typecheck` and `npm run build` pass.
+Key files/modules:
+- `src/renderer/vrm-stage.ts`
+- optional small copy/status tweak in `src/renderer/app.ts` only if useful
+Dependencies: existing MVP
+Size: focused
+
+### [x] Animation Item 2 — Real clip-based avatar animations
+Goal: Replace the bad procedural bone-wiggle look with a real animation system using `THREE.AnimationMixer` and authored `AnimationClip`s for idle and emotes.
+Done when:
+- The avatar uses generated `AnimationClip`s / `QuaternionKeyframeTrack`s on humanoid bones instead of ad-hoc per-frame arm posing as the main animation mechanism.
+- There is a good default idle loop with arms relaxed, body breathing, subtle head/torso movement, and no T-pose.
+- At least two recognizable emote/gesture clips exist, such as wave, bounce/happy, dance, nod, or shrug.
+- The stage periodically crossfades between idle and an emote so it feels alive without user input.
+- Cursor look/reaction still works and provider/chat UI behavior remains unchanged.
+- `npm run typecheck` and `npm run build` pass.
+Key files/modules:
+- `src/renderer/vrm-stage.ts`
+- optional new helper module under `src/renderer/` if that keeps clip authoring clean
+Dependencies: existing MVP and Animation Item 1 context
+Size: medium
+
+### [x] UI Item 1 — Bonzi speech bubble assistant UI
+Goal: Replace the bottom chat-window feel with a Bonzi-style speech bubble that pops above/near the avatar's head while preserving assistant commands/actions.
+Done when:
+- The visible assistant response appears in a floating speech bubble positioned above the character/stage, not as a large bottom chat panel.
+- The bottom UI is reduced to a small command input/launcher or similarly lightweight control, so the app feels like a desktop buddy instead of a chat app.
+- User messages, assistant replies, warnings, and action execution results update the speech bubble sensibly.
+- Allowlisted action buttons still work, including confirmation flow for sensitive actions.
+- Provider/chat IPC behavior remains unchanged.
+- `npm run typecheck` and `npm run build` pass.
+Key files/modules:
+- `src/renderer/app.ts`
+- `src/renderer/styles.css`
+Dependencies: existing MVP and animation pass
+Size: medium
+
 ## Work Items
 
 ### [x] Item 1 — App scaffold and desktop window shell

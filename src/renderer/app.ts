@@ -39,6 +39,43 @@ function formatTimestamp(value: string): string {
   })
 }
 
+function labelForRole(role: AssistantMessage['role']): string {
+  switch (role) {
+    case 'assistant':
+      return 'Bonzi'
+    case 'user':
+      return 'You'
+    case 'system':
+      return 'Update'
+    default:
+      return role
+  }
+}
+
+function getVisibleConversationEntries(
+  entries: ConversationEntry[]
+): ConversationEntry[] {
+  if (entries.length <= 3) {
+    return entries
+  }
+
+  const recentEntries = entries.slice(-2)
+  const actionableEntries = entries.filter((entry) =>
+    entry.actions.some((action) => action.status !== 'completed')
+  )
+
+  if (actionableEntries.length === 0) {
+    return entries.slice(-3)
+  }
+
+  const selectedEntries = new Set<ConversationEntry>([
+    ...actionableEntries,
+    ...recentEntries
+  ])
+
+  return entries.filter((entry) => selectedEntries.has(entry))
+}
+
 function renderConversation(
   chatLog: HTMLElement,
   entries: ConversationEntry[],
@@ -47,14 +84,14 @@ function renderConversation(
   if (entries.length === 0) {
     chatLog.innerHTML = `
       <div class="empty-state">
-        <p>No assistant messages yet.</p>
+        <p>Hi! I’m Bonzi. Give me a command and I’ll answer up here.</p>
         <p class="muted">Try: ${EXAMPLE_COMMANDS.join(' · ')}</p>
       </div>
     `
     return
   }
 
-  chatLog.innerHTML = entries
+  chatLog.innerHTML = getVisibleConversationEntries(entries)
     .map(({ message, actions, warnings }) => {
       const actionMarkup =
         actions.length === 0
@@ -64,13 +101,13 @@ function renderConversation(
               ${actions
                 .map((action) => {
                   const label =
-                    action.requiresConfirmation &&
-                    pendingConfirmations.has(action.id)
-                      ? 'Approve & run'
-                      : action.requiresConfirmation
-                        ? 'Request confirmation'
-                        : action.status === 'completed'
-                          ? 'Completed'
+                    action.status === 'completed'
+                      ? 'Completed'
+                      : action.requiresConfirmation &&
+                          pendingConfirmations.has(action.id)
+                        ? 'Approve & run'
+                        : action.requiresConfirmation
+                          ? 'Request confirmation'
                           : 'Run action'
 
                   return `
@@ -103,14 +140,16 @@ function renderConversation(
         .join('')
 
       return `
-        <article class="message message--${escapeHtml(message.role)}">
-          <header class="message__meta">
-            <span class="message__role">${escapeHtml(message.role)}</span>
+        <article class="bubble-entry bubble-entry--${escapeHtml(message.role)}">
+          <header class="bubble-entry__meta">
+            <span class="bubble-entry__role">${escapeHtml(
+              labelForRole(message.role)
+            )}</span>
             <time datetime="${escapeHtml(message.createdAt)}">${escapeHtml(
               formatTimestamp(message.createdAt)
             )}</time>
           </header>
-          <p class="message__content">${escapeHtml(message.content)}</p>
+          <p class="bubble-entry__content">${escapeHtml(message.content)}</p>
           ${warningMarkup}
           ${actionMarkup}
         </article>
@@ -174,7 +213,7 @@ export function renderApp(root: HTMLDivElement): void {
           <span class="titlebar__dot"></span>
           <div>
             <div>Bonzi Companion</div>
-            <p class="titlebar__caption">Item 3 — assistant/task layer live</p>
+            <p class="titlebar__caption">UI Item 1 — speech bubble assistant</p>
           </div>
         </div>
         <div class="titlebar__actions">
@@ -183,14 +222,8 @@ export function renderApp(root: HTMLDivElement): void {
         </div>
       </header>
 
-      <section class="card stage-card">
+      <section class="stage-card">
         <div class="stage-card__copy">
-          <p class="eyebrow">Transparent VRM stage + assistant shell</p>
-          <h1>Bonzi keeps the VRM renderer and now accepts typed assistant commands.</h1>
-          <p class="lede">
-            The avatar still renders on the transparent Three.js stage while the renderer
-            now talks to main through typed IPC for provider-backed replies and safe task execution.
-          </p>
           <div class="status-row">
             <span class="status-pill" data-vrm-status>Preparing renderer…</span>
             <span class="status-pill status-pill--subtle" data-provider-label>Loading provider…</span>
@@ -198,82 +231,49 @@ export function renderApp(root: HTMLDivElement): void {
               Retry load
             </button>
           </div>
-          <p class="muted" data-vrm-error hidden></p>
-          <ul class="feature-list">
-            <li>The assistant can propose only allowlisted desktop actions.</li>
-            <li>Sensitive actions stay behind an explicit confirmation step.</li>
-          </ul>
+          <p class="muted stage-card__error" data-vrm-error hidden></p>
+        </div>
+
+        <div class="speech-bubble-shell" aria-live="polite">
+          <div class="speech-bubble" data-chat-log aria-label="Bonzi speech bubble"></div>
         </div>
 
         <div class="stage-shell">
           <div class="stage-shell__glow" aria-hidden="true"></div>
           <canvas class="stage-canvas" data-vrm-canvas aria-label="Bonzi VRM stage"></canvas>
-          <div class="stage-overlay" aria-hidden="true">
-            <span class="stage-overlay__badge">Three.js + @pixiv/three-vrm</span>
-          </div>
         </div>
       </section>
 
-      <section class="grid">
-        <article class="card assistant-card">
-          <div class="assistant-card__header">
-            <div>
-              <h2>Assistant</h2>
-              <p class="muted">
-                Commands route through preload → main IPC → provider service. No unrestricted shell execution.
-              </p>
-            </div>
-            <span class="status-pill status-pill--subtle" data-provider-pill>Awaiting state…</span>
+      <section class="command-dock" aria-label="Assistant command launcher">
+        <div class="command-dock__top">
+          <div>
+            <p class="command-dock__label">Talk to Bonzi</p>
+            <p class="command-dock__hint">Examples: ${EXAMPLE_COMMANDS.join(' · ')}</p>
           </div>
+          <span class="status-pill status-pill--subtle" data-provider-pill>Awaiting state…</span>
+        </div>
 
-          <div class="chat-log" data-chat-log></div>
+        <form class="chat-form chat-form--dock" data-chat-form>
+          <label class="sr-only" for="assistant-command">Command</label>
+          <div class="chat-form__row">
+            <input
+              id="assistant-command"
+              class="chat-input"
+              name="command"
+              type="text"
+              autocomplete="off"
+              placeholder="Type a command for Bonzi"
+            />
+            <button class="action-button" data-role="assistant-send" type="submit">
+              Send
+            </button>
+          </div>
+        </form>
 
-          <form class="chat-form" data-chat-form>
-            <label class="chat-form__label" for="assistant-command">Command</label>
-            <div class="chat-form__row">
-              <input
-                id="assistant-command"
-                class="chat-input"
-                name="command"
-                type="text"
-                autocomplete="off"
-                placeholder="Ask Bonzi to summarize state, copy the VRM path, or minimize the window"
-              />
-              <button class="action-button" data-role="assistant-send" type="submit">
-                Send
-              </button>
-            </div>
-            <p class="muted">Examples: ${EXAMPLE_COMMANDS.join(' · ')}</p>
-          </form>
-        </article>
-
-        <article class="card">
-          <h2>Shell state</h2>
-          <p class="muted">Renderer state, provider selection, and allowlisted actions exposed by main.</p>
+        <div class="debug-readouts" hidden>
           <code class="inline-code" data-vrm-path>Loading asset path…</code>
           <pre class="state-block" data-shell-state>Loading shell metadata…</pre>
-        </article>
-      </section>
-
-      <section class="grid grid--bottom">
-        <article class="card">
-          <h2>Provider config notes</h2>
-          <ul class="todo-list">
-            <li><code>BONZI_ASSISTANT_PROVIDER</code>: <code>mock</code> or <code>openai-compatible</code></li>
-            <li><code>BONZI_OPENAI_API_KEY</code>: required for Z.AI / OpenAI-compatible provider</li>
-            <li>Z.AI base URL: <code>https://api.z.ai/api/coding/paas/v4</code></li>
-            <li>Model examples: <code>GLM-5.1</code>, <code>GLM-5</code>, <code>GLM-5-Turbo</code>, <code>GLM-4.7</code>, <code>GLM-4.5-air</code></li>
-          </ul>
-        </article>
-
-        <article class="card">
-          <h2>Execution safety</h2>
-          <ul class="todo-list">
-            <li>Only explicit allowlisted actions are executable from assistant replies.</li>
-            <li>Close-window actions require confirmation before they run.</li>
-            <li>No shell/task runner is exposed in preload or main.</li>
-          </ul>
-        </article>
+        </div>
       </section>
     </main>
   `
@@ -293,6 +293,9 @@ export function renderApp(root: HTMLDivElement): void {
   const chatLogEl = root.querySelector<HTMLElement>('[data-chat-log]')
   const chatFormEl = root.querySelector<HTMLFormElement>('[data-chat-form]')
   const chatInputEl = root.querySelector<HTMLInputElement>('#assistant-command')
+  const assistantSendButton = root.querySelector<HTMLButtonElement>(
+    '[data-role="assistant-send"]'
+  )
 
   if (
     !shellStateEl ||
@@ -307,7 +310,8 @@ export function renderApp(root: HTMLDivElement): void {
     !providerPillEl ||
     !chatLogEl ||
     !chatFormEl ||
-    !chatInputEl
+    !chatInputEl ||
+    !assistantSendButton
   ) {
     throw new Error('Renderer shell did not mount expected controls.')
   }
@@ -363,15 +367,27 @@ export function renderApp(root: HTMLDivElement): void {
   }
 
   minimizeButton.addEventListener('click', () => {
+    if (!window.bonzi) {
+      return
+    }
+
     window.bonzi.window.minimize()
   })
 
   closeButton.addEventListener('click', () => {
+    if (!window.bonzi) {
+      return
+    }
+
     window.bonzi.window.close()
   })
 
   chatFormEl.addEventListener('submit', async (event) => {
     event.preventDefault()
+
+    if (!window.bonzi) {
+      return
+    }
 
     const command = chatInputEl.value.trim()
 
@@ -418,6 +434,10 @@ export function renderApp(root: HTMLDivElement): void {
   })
 
   chatLogEl.addEventListener('click', async (event) => {
+    if (!window.bonzi) {
+      return
+    }
+
     const target = event.target
 
     if (!(target instanceof HTMLElement)) {
@@ -476,6 +496,10 @@ export function renderApp(root: HTMLDivElement): void {
     vrmErrorEl.hidden = false
     vrmErrorEl.textContent = message
     vrmRetryButton.hidden = true
+    minimizeButton.disabled = true
+    closeButton.disabled = true
+    chatInputEl.disabled = true
+    assistantSendButton.disabled = true
     appendSystemMessage(message)
     return
   }
