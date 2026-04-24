@@ -1,7 +1,8 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { VRM, VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm'
-import { createAuthoredVrmClips } from './vrm-animation-clips'
+import { VRMAnimationLoaderPlugin } from '@pixiv/three-vrm-animation'
+import { resolveStageAnimationSet } from './vrma-animation-resolver'
 
 interface VrmStageCallbacks {
   onStatusChange?: (message: string) => void
@@ -31,13 +32,14 @@ interface VrmAnimationState {
   phase: AnimationPhase
   returnAt: number
   returnEndAt: number
+  statusMessage: string
 }
 
 const MIN_HEIGHT = 1.45
 const MAX_PIXEL_RATIO = 2
-const EMOTE_FADE_SECONDS = 0.55
-const MIN_EMOTE_INTERVAL_SECONDS = 5.4
-const MAX_EMOTE_INTERVAL_SECONDS = 8.8
+const EMOTE_FADE_SECONDS = 0.85
+const MIN_EMOTE_INTERVAL_SECONDS = 8
+const MAX_EMOTE_INTERVAL_SECONDS = 14
 
 export function createVrmStage(
   canvas: HTMLCanvasElement,
@@ -80,6 +82,7 @@ export function createVrmStage(
   scene.add(lights.hemisphere, lights.key, lights.rim)
 
   loader.register((parser) => new VRMLoaderPlugin(parser))
+  loader.register((parser) => new VRMAnimationLoaderPlugin(parser))
 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO))
   renderer.setClearColor(0x000000, 0)
@@ -138,10 +141,16 @@ export function createVrmStage(
         throw new Error('The loaded asset did not expose a VRM instance.')
       }
 
-      finalizeLoadedVrm(vrm)
-      callbacks.onStatusChange?.(
-        'VRM ready — Bonzi is idling, emoting, and tracking your cursor.'
-      )
+      callbacks.onStatusChange?.('VRM model ready — loading animation assets…')
+      const resolvedAnimationSet = await resolveStageAnimationSet(loader, vrm)
+
+      if (disposed || loadId !== activeLoadId) {
+        disposeUnusedScene(vrm.scene)
+        return
+      }
+
+      finalizeLoadedVrm(vrm, resolvedAnimationSet)
+      callbacks.onStatusChange?.(currentAnimationState?.statusMessage ?? 'VRM ready')
     } catch (error) {
       if (disposed || loadId !== activeLoadId) {
         return
@@ -159,7 +168,10 @@ export function createVrmStage(
     }
   }
 
-  function finalizeLoadedVrm(vrm: VRM): void {
+  function finalizeLoadedVrm(
+    vrm: VRM,
+    resolvedAnimationSet: Awaited<ReturnType<typeof resolveStageAnimationSet>>
+  ): void {
     currentVrm = vrm
 
     VRMUtils.rotateVRM0(vrm)
@@ -171,11 +183,15 @@ export function createVrmStage(
     scene.add(vrm.scene)
 
     if (vrm.lookAt) {
-      vrm.lookAt.autoUpdate = true
-      vrm.lookAt.target = pointerTarget
+      vrm.lookAt.autoUpdate = !resolvedAnimationSet.hasLookAtTracks
+      vrm.lookAt.target = resolvedAnimationSet.hasLookAtTracks ? null : pointerTarget
     }
 
-    currentAnimationState = createAnimationState(vrm, animationTimeSeconds)
+    currentAnimationState = createAnimationState(
+      vrm,
+      resolvedAnimationSet,
+      animationTimeSeconds
+    )
     currentAnimationState.mixer.update(0)
     vrm.update(0)
 
@@ -186,24 +202,31 @@ export function createVrmStage(
     frameSubject()
   }
 
-  function createAnimationState(vrm: VRM, elapsed: number): VrmAnimationState {
-    const clips = createAuthoredVrmClips(vrm)
+  function createAnimationState(
+    vrm: VRM,
+    resolvedAnimationSet: Awaited<ReturnType<typeof resolveStageAnimationSet>>,
+    elapsed: number
+  ): VrmAnimationState {
     const mixer = new THREE.AnimationMixer(vrm.scene)
-    const idleAction = mixer.clipAction(clips.idle)
+    const idleAction = mixer.clipAction(resolvedAnimationSet.idle)
 
     idleAction.enabled = true
     idleAction.setLoop(THREE.LoopRepeat, Infinity)
     idleAction.play()
 
-    const emotes = clips.emotes.map((clip) => {
+    const emotes = resolvedAnimationSet.emotes.map((clip) => {
       const action = mixer.clipAction(clip)
       action.enabled = false
       action.clampWhenFinished = true
       action.setLoop(THREE.LoopOnce, 1)
 
+      if (clip.name.includes('wave')) {
+        action.timeScale = 0.82
+      }
+
       return {
         action,
-        duration: clip.duration,
+        duration: clip.duration / action.timeScale,
         name: clip.name
       }
     })
@@ -217,7 +240,8 @@ export function createVrmStage(
       nextEmoteAt: scheduleNextEmoteAt(elapsed),
       phase: 'idle',
       returnAt: Number.POSITIVE_INFINITY,
-      returnEndAt: Number.POSITIVE_INFINITY
+      returnEndAt: Number.POSITIVE_INFINITY,
+      statusMessage: resolvedAnimationSet.statusMessage
     }
   }
 
@@ -250,18 +274,18 @@ export function createVrmStage(
       return
     }
 
-    const focusY = subjectCenter.y + currentRootHeight * 0.44
+    const focusY = subjectCenter.y + currentRootHeight * 0.28
     const halfVerticalFov = THREE.MathUtils.degToRad(camera.fov * 0.5)
     const halfHorizontalFov = Math.atan(Math.tan(halfVerticalFov) * camera.aspect)
-    const fitHeightDistance = (currentRootHeight * 0.66) / Math.tan(halfVerticalFov)
+    const fitHeightDistance = (currentRootHeight * 0.72) / Math.tan(halfVerticalFov)
     const fitWidthDistance =
       (Math.max(subjectSize.x, 0.75) * 0.78) / Math.tan(halfHorizontalFov)
-    const distance = Math.max(fitHeightDistance, fitWidthDistance) + subjectSize.z * 1.18
+    const distance = Math.max(fitHeightDistance, fitWidthDistance) + subjectSize.z * 1.28
 
     cameraTarget.set(subjectCenter.x, focusY, subjectCenter.z)
     camera.position.set(
       subjectCenter.x + 0.04,
-      subjectCenter.y + currentRootHeight * 0.62,
+      subjectCenter.y + currentRootHeight * 0.56,
       subjectCenter.z + distance
     )
     camera.lookAt(cameraTarget)

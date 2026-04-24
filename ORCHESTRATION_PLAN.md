@@ -53,6 +53,23 @@ Key files/modules:
 Dependencies: existing MVP and animation pass
 Size: medium
 
+### [x] Animation Item 3 — Real VRMA animation pipeline
+Goal: Replace the fake authored quaternion-track animation approach with a proper VRM Animation (`.vrma`) pipeline using `@pixiv/three-vrm-animation`.
+Done when:
+- The app depends on `@pixiv/three-vrm-animation` and registers `VRMAnimationLoaderPlugin` with the renderer loader.
+- `src/renderer/vrm-stage.ts` can load external/bundled `.vrma` assets and convert them with `createVRMAnimationClip` for the currently loaded VRM.
+- The app looks for a basic idle/standing animation and a greeting/wave animation from `public/static/animations/` or a similarly documented location.
+- If VRMA files are missing, the app falls back gracefully and tells the user where to put `idle.vrma` and `wave.vrma` instead of pretending fake animations are real.
+- Documentation explains that real standing/waving requires actual `.vrma` files, with references to VRoid/BOOTH motion packs and terms.
+- `npm run typecheck` and `npm run build` pass.
+Key files/modules:
+- `package.json`, `package-lock.json`
+- `src/renderer/vrm-stage.ts`
+- optional `src/renderer/vrma-*` helper module
+- `README.md`
+Dependencies: existing MVP
+Size: medium
+
 ## Work Items
 
 ### [x] Item 1 — App scaffold and desktop window shell
