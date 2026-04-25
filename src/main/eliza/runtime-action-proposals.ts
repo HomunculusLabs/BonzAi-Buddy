@@ -76,7 +76,7 @@ export function extractBonziActionsFromActionResults(
   results: ActionResult[]
 ): BonziProposedAction[] {
   return results.flatMap((result) => {
-    if (result.success === false) {
+    if (result.success === false || result.data?.bonziActionExecuted === true) {
       return []
     }
 

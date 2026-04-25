@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, type BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import {
   AgentRuntime,
@@ -30,6 +30,7 @@ import {
 import {
   normalizeText
 } from '../assistant-action-param-utils'
+import { executeWorkflowBonziDesktopAction } from '../assistant-action-executor'
 import { createBonziDesktopActionProposal } from './bonzi-desktop-actions-plugin'
 import {
   loadBonziElizaConfig,
@@ -71,6 +72,7 @@ interface RuntimeBundle {
 
 interface BonziRuntimeManagerOptions {
   getShellState: () => ShellState
+  getCompanionWindow?: () => BrowserWindow | null
   dataDir?: string
   workflowRunsPath?: string
 }
@@ -101,6 +103,7 @@ export class BonziRuntimeManager {
   private readonly listeners = new Set<(event: AssistantEvent) => void>()
   private readonly dataDir: string
   private readonly getShellState: () => ShellState
+  private readonly getCompanionWindow: () => BrowserWindow | null
   private readonly embeddingsService = new BonziExternalEmbeddingsService()
   private readonly pluginSettingsStore = new BonziPluginSettingsStore()
   private readonly pluginDiscoveryService = new BonziPluginDiscoveryService({
@@ -117,6 +120,7 @@ export class BonziRuntimeManager {
 
   constructor(options: BonziRuntimeManagerOptions) {
     this.getShellState = options.getShellState
+    this.getCompanionWindow = options.getCompanionWindow ?? (() => null)
     this.dataDir = options.dataDir ?? join(app.getPath('userData'), 'eliza-localdb')
     this.workflowManager = new BonziWorkflowManager({
       persistencePath: options.workflowRunsPath
@@ -124,7 +128,18 @@ export class BonziRuntimeManager {
     this.pluginRuntimeResolver = new BonziPluginRuntimeResolver({
       settingsStore: this.pluginSettingsStore,
       userDataDir: app.getPath('userData'),
-      workflowManager: this.workflowManager
+      workflowManager: this.workflowManager,
+      bonziDesktopActionGateway: {
+        execute: ({ proposal, approved }) =>
+          executeWorkflowBonziDesktopAction(
+            proposal,
+            {
+              shellState: this.getShellState(),
+              companionWindow: this.getCompanionWindow()
+            },
+            { approved }
+          )
+      }
     })
     this.unsubscribeWorkflowEvents = this.workflowManager.subscribe((run) => {
       this.emit({

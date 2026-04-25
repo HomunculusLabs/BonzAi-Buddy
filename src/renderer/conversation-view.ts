@@ -1,7 +1,9 @@
 import type {
   AssistantAction,
   AssistantCommandResponse,
-  AssistantMessage
+  AssistantMessage,
+  BonziWorkflowRunSnapshot,
+  BonziWorkflowStepSnapshot
 } from '../shared/contracts'
 
 const EXAMPLE_COMMANDS = [
@@ -11,10 +13,18 @@ const EXAMPLE_COMMANDS = [
   'close window'
 ]
 
+const TERMINAL_WORKFLOW_RUN_STATUSES = new Set<BonziWorkflowRunSnapshot['status']>([
+  'completed',
+  'failed',
+  'cancelled',
+  'interrupted'
+])
+
 export interface ConversationEntry {
   message: AssistantMessage
   actions: AssistantAction[]
   warnings: string[]
+  workflowRun?: BonziWorkflowRunSnapshot
 }
 
 function escapeHtml(value: string): string {
@@ -46,6 +56,150 @@ function labelForRole(role: AssistantMessage['role']): string {
   }
 }
 
+function labelForWorkflowStatus(status: string): string {
+  return status.replaceAll('_', ' ')
+}
+
+function isTerminalWorkflowRunStatus(status: BonziWorkflowRunSnapshot['status']): boolean {
+  return TERMINAL_WORKFLOW_RUN_STATUSES.has(status)
+}
+
+function isCurrentWorkflowStep(step: BonziWorkflowStepSnapshot): boolean {
+  return (
+    step.status === 'running' ||
+    step.status === 'awaiting_approval' ||
+    step.status === 'awaiting_user' ||
+    step.status === 'cancel_requested'
+  )
+}
+
+function getCurrentWorkflowStep(
+  run: BonziWorkflowRunSnapshot
+): BonziWorkflowStepSnapshot | null {
+  for (const step of run.steps) {
+    if (isCurrentWorkflowStep(step)) {
+      return step
+    }
+  }
+
+  return run.steps.at(-1) ?? null
+}
+
+function renderWorkflowSummary(run: BonziWorkflowRunSnapshot): string {
+  const completedCount = run.steps.filter((step) => step.status === 'completed').length
+  const failedCount = run.steps.filter((step) => step.status === 'failed').length
+  const awaitingApprovalCount = run.steps.filter(
+    (step) => step.status === 'awaiting_approval'
+  ).length
+
+  if (run.status === 'completed') {
+    return `${completedCount}/${run.steps.length} steps completed`
+  }
+
+  if (run.status === 'failed') {
+    return failedCount > 0
+      ? `${failedCount} step${failedCount === 1 ? '' : 's'} failed`
+      : run.error ?? 'Workflow failed'
+  }
+
+  if (run.status === 'cancelled') {
+    return 'Workflow cancelled'
+  }
+
+  if (run.status === 'interrupted') {
+    return 'Workflow interrupted'
+  }
+
+  if (awaitingApprovalCount > 0) {
+    return `Waiting for approval on ${awaitingApprovalCount} step${awaitingApprovalCount === 1 ? '' : 's'}`
+  }
+
+  return `${completedCount}/${run.steps.length} steps completed`
+}
+
+function renderWorkflowRun(run: BonziWorkflowRunSnapshot): string {
+  const currentStep = getCurrentWorkflowStep(run)
+  const stepMarkup =
+    run.steps.length === 0
+      ? '<li class="workflow-card__step workflow-card__step--empty">No workflow steps were reported.</li>'
+      : run.steps
+          .map((step) => {
+            const isCurrent = currentStep?.id === step.id
+            const detail = step.detail ? `<p>${escapeHtml(step.detail)}</p>` : ''
+            const approvalPrompt =
+              step.status === 'awaiting_approval' && step.approvalPrompt
+                ? `<p class="workflow-card__approval-prompt">${escapeHtml(step.approvalPrompt)}</p>`
+                : ''
+            const controls =
+              step.status === 'awaiting_approval'
+                ? `
+                    <div class="workflow-card__controls">
+                      <button
+                        class="ghost-button workflow-button workflow-button--approve"
+                        type="button"
+                        data-workflow-approve="true"
+                        data-workflow-run-id="${escapeHtml(run.id)}"
+                        data-workflow-step-id="${escapeHtml(step.id)}"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        class="ghost-button workflow-button workflow-button--decline"
+                        type="button"
+                        data-workflow-decline="true"
+                        data-workflow-run-id="${escapeHtml(run.id)}"
+                        data-workflow-step-id="${escapeHtml(step.id)}"
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  `
+                : ''
+
+            return `
+              <li class="workflow-card__step${isCurrent ? ' workflow-card__step--current' : ''}">
+                <div class="workflow-card__step-title-row">
+                  <strong>${escapeHtml(step.title)}</strong>
+                  <span class="workflow-card__step-status">${escapeHtml(labelForWorkflowStatus(step.status))}</span>
+                </div>
+                ${detail}
+                ${approvalPrompt}
+                ${controls}
+              </li>
+            `
+          })
+          .join('')
+
+  const cancelMarkup = isTerminalWorkflowRunStatus(run.status)
+    ? ''
+    : `
+        <button
+          class="ghost-button workflow-button workflow-button--cancel"
+          type="button"
+          data-workflow-cancel="true"
+          data-workflow-run-id="${escapeHtml(run.id)}"
+        >
+          Cancel workflow
+        </button>
+      `
+
+  return `
+    <section class="workflow-card" data-workflow-card data-workflow-run-id="${escapeHtml(run.id)}">
+      <header class="workflow-card__header">
+        <strong>Workflow</strong>
+        <span class="workflow-card__run-status">${escapeHtml(labelForWorkflowStatus(run.status))}</span>
+      </header>
+      <p class="workflow-card__summary">${escapeHtml(renderWorkflowSummary(run))}</p>
+      ${currentStep ? `<p class="workflow-card__current">Current step: ${escapeHtml(currentStep.title)}</p>` : ''}
+      ${run.error ? `<p class="workflow-card__error">${escapeHtml(run.error)}</p>` : ''}
+      <ol class="workflow-card__steps">
+        ${stepMarkup}
+      </ol>
+      ${cancelMarkup}
+    </section>
+  `
+}
+
 export function getActiveConversationEntry(
   entries: ConversationEntry[]
 ): ConversationEntry | null {
@@ -58,8 +212,10 @@ export function getActiveConversationEntry(
     const hasPendingActions = entry.actions.some(
       (action) => action.status !== 'completed' && action.status !== 'failed'
     )
+    const hasActiveWorkflowRun =
+      entry.workflowRun && !isTerminalWorkflowRunStatus(entry.workflowRun.status)
 
-    if (hasPendingActions || entry.warnings.length > 0) {
+    if (hasPendingActions || entry.warnings.length > 0 || hasActiveWorkflowRun) {
       return entry
     }
   }
@@ -77,7 +233,15 @@ export function getActiveConversationEntry(
 export function hasPendingBubbleActions(
   entry: ConversationEntry | null
 ): boolean {
-  return entry?.actions.some((action) => action.status !== 'completed') ?? false
+  if (!entry) {
+    return false
+  }
+
+  const hasPendingActions = entry.actions.some((action) => action.status !== 'completed')
+  const hasActiveWorkflowRun =
+    entry.workflowRun && !isTerminalWorkflowRunStatus(entry.workflowRun.status)
+
+  return hasPendingActions || Boolean(hasActiveWorkflowRun)
 }
 
 export function renderConversation(
@@ -118,7 +282,7 @@ export function renderConversation(
     return
   }
 
-  const { message, actions, warnings } = activeEntry
+  const { message, actions, warnings, workflowRun } = activeEntry
   const actionMarkup =
     actions.length === 0
       ? ''
@@ -166,6 +330,8 @@ export function renderConversation(
     )
     .join('')
 
+  const workflowMarkup = workflowRun ? renderWorkflowRun(workflowRun) : ''
+
   chatLog.dataset.bubbleTone = message.role
   chatLog.innerHTML = `
     <article class="bubble-entry bubble-entry--${escapeHtml(message.role)}">
@@ -178,6 +344,7 @@ export function renderConversation(
       <p class="bubble-entry__content">${escapeHtml(message.content)}</p>
       ${warningMarkup}
       ${actionMarkup}
+      ${workflowMarkup}
     </article>
   `
 }
@@ -228,7 +395,8 @@ export function addAssistantTurn(
     entries.push({
       message: response.reply,
       actions: response.actions,
-      warnings: response.warnings
+      warnings: response.warnings,
+      workflowRun: response.workflowRun
     })
   }
 }

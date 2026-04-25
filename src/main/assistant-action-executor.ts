@@ -1,5 +1,10 @@
 import { clipboard, shell, type BrowserWindow } from 'electron'
-import type { AssistantAction, ShellState } from '../shared/contracts'
+import type {
+  AssistantAction,
+  AssistantActionParams,
+  AssistantActionType,
+  ShellState
+} from '../shared/contracts'
 import {
   captureDiscordScreenshot,
   checkCuaDriverStatus,
@@ -10,6 +15,7 @@ import {
 import {
   normalizeScrollDirection,
   normalizeText,
+  sanitizeAssistantActionParams,
   truncate
 } from './assistant-action-param-utils'
 import { describeImageWithVision } from './vision-client'
@@ -17,6 +23,41 @@ import { describeImageWithVision } from './vision-client'
 interface AssistantActionExecutorDeps {
   shellState: ShellState
   companionWindow: BrowserWindow | null
+}
+
+export interface WorkflowBonziDesktopActionProposal {
+  type: AssistantActionType
+  requiresConfirmation?: boolean
+  params?: AssistantActionParams
+}
+
+export async function executeWorkflowBonziDesktopAction(
+  proposal: WorkflowBonziDesktopActionProposal,
+  deps: AssistantActionExecutorDeps,
+  options: { approved: boolean }
+): Promise<string> {
+  const params = sanitizeAssistantActionParams(proposal.params)
+  const requiresConfirmation =
+    proposal.requiresConfirmation === true ||
+    proposal.type === 'close-window'
+
+  if (requiresConfirmation && !options.approved) {
+    throw new Error(
+      `Workflow approval is required before executing ${proposal.type}.`
+    )
+  }
+
+  const action: AssistantAction = {
+    id: 'workflow-bonzi-desktop-action',
+    type: proposal.type,
+    title: `Workflow ${proposal.type}`,
+    description: 'Workflow-executed Bonzi desktop action.',
+    requiresConfirmation,
+    status: 'pending',
+    ...(params ? { params } : {})
+  }
+
+  return executeAssistantAction(action, deps)
 }
 
 export async function executeAssistantAction(

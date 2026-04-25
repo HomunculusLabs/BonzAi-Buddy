@@ -3,6 +3,7 @@ import {
   type AssistantEventEmoteId,
   type AssistantMessage,
   type AssistantRuntimeStatus,
+  type BonziWorkflowRunSnapshot,
   type ElizaPluginSettings,
   type ShellState,
   type UpdateElizaPluginSettingsRequest
@@ -84,6 +85,14 @@ export function renderApp(root: HTMLDivElement): void {
         </header>
         <div class="settings-panel__plugins" data-plugin-settings></div>
         <p class="settings-panel__status" data-settings-status aria-live="polite"></p>
+        <button
+          class="ghost-button"
+          data-action="apply-runtime-changes"
+          type="button"
+          hidden
+        >
+          Apply Runtime Changes
+        </button>
       </aside>
 
       <section class="stage-card">
@@ -164,6 +173,9 @@ export function renderApp(root: HTMLDivElement): void {
   const settingsPanelEl = root.querySelector<HTMLElement>('[data-settings-panel]')
   const pluginSettingsEl = root.querySelector<HTMLElement>('[data-plugin-settings]')
   const settingsStatusEl = root.querySelector<HTMLElement>('[data-settings-status]')
+  const applyRuntimeChangesButton = root.querySelector<HTMLButtonElement>(
+    '[data-action="apply-runtime-changes"]'
+  )
 
   if (
     !shellStateEl ||
@@ -186,7 +198,8 @@ export function renderApp(root: HTMLDivElement): void {
     !assistantSendButton ||
     !settingsPanelEl ||
     !pluginSettingsEl ||
-    !settingsStatusEl
+    !settingsStatusEl ||
+    !applyRuntimeChangesButton
   ) {
     throw new Error('Renderer shell did not mount expected controls.')
   }
@@ -200,23 +213,50 @@ export function renderApp(root: HTMLDivElement): void {
     shellEl.dataset.appReady = state
   }
 
+  const syncSettingsStatusUi = (): void => {
+    const runtimeMessage = isRuntimeReloadPending
+      ? 'Runtime plugin changes are pending. Apply Runtime Changes to reload elizaOS now.'
+      : ''
+    settingsStatusEl.textContent = [settingsStatusMessage, runtimeMessage]
+      .filter((value) => value.trim().length > 0)
+      .join(' ')
+
+    applyRuntimeChangesButton.hidden = !isRuntimeReloadPending
+    applyRuntimeChangesButton.disabled = isSavingSettings || isApplyingRuntimeChanges
+  }
+
   const setSettingsStatus = (message: string): void => {
-    settingsStatusEl.textContent = message
+    settingsStatusMessage = message
+    syncSettingsStatusUi()
+  }
+
+  const setRuntimeReloadPending = (pending: boolean): void => {
+    isRuntimeReloadPending = pending
+    syncSettingsStatusUi()
   }
 
   const rerenderPluginSettings = (): void => {
     renderPluginSettings(pluginSettingsEl, pluginSettings, {
       isSaving: isSavingSettings
     })
+    syncSettingsStatusUi()
   }
 
-  const setSettingsVisible = (visible: boolean): void => {
-    isSettingsVisible = visible
-    settingsPanelEl.hidden = !visible
-    shellEl.classList.toggle('shell--settings-open', visible)
+  const discoverPluginSettings = async (): Promise<ElizaPluginSettings> => {
+    if (!window.bonzi) {
+      throw new Error('Bonzi bridge unavailable')
+    }
 
-    if (visible) {
-      void hydratePluginSettings()
+    if (typeof window.bonzi.plugins?.discover !== 'function') {
+      return window.bonzi.settings.getElizaPlugins()
+    }
+
+    try {
+      return await window.bonzi.plugins.discover({
+        includeInstalled: true
+      } as unknown as Parameters<typeof window.bonzi.plugins.discover>[0])
+    } catch {
+      return window.bonzi.plugins.discover({})
     }
   }
 
@@ -231,15 +271,41 @@ export function renderApp(root: HTMLDivElement): void {
       if (!options.preserveStatus) {
         setSettingsStatus('')
       }
-      pluginSettings = await window.bonzi.settings.getElizaPlugins()
+      pluginSettings = await discoverPluginSettings()
+      for (const pluginId of pendingPluginInstallConfirmations.keys()) {
+        if (!pluginSettings.availablePlugins.some((plugin) => plugin.id === pluginId)) {
+          pendingPluginInstallConfirmations.delete(pluginId)
+        }
+      }
       rerenderPluginSettings()
-    } catch (error) {
-      setSettingsStatus(`Failed to load plugin settings: ${String(error)}`)
+    } catch {
+      try {
+        pluginSettings = await window.bonzi.settings.getElizaPlugins()
+        for (const pluginId of pendingPluginInstallConfirmations.keys()) {
+          if (!pluginSettings.availablePlugins.some((plugin) => plugin.id === pluginId)) {
+            pendingPluginInstallConfirmations.delete(pluginId)
+          }
+        }
+        rerenderPluginSettings()
+      } catch (error) {
+        setSettingsStatus(`Failed to load plugin settings: ${String(error)}`)
+      }
+    }
+  }
+
+  const setSettingsVisible = (visible: boolean): void => {
+    isSettingsVisible = visible
+    settingsPanelEl.hidden = !visible
+    shellEl.classList.toggle('shell--settings-open', visible)
+
+    if (visible) {
+      void hydratePluginSettings()
     }
   }
 
   let shellState: ShellState | null = null
   const conversation: ConversationEntry[] = []
+  const workflowRunsById = new Map<string, BonziWorkflowRunSnapshot>()
   const pendingConfirmations = new Set<string>()
   let isUiVisible = false
   let isAwaitingAssistant = false
@@ -247,9 +313,12 @@ export function renderApp(root: HTMLDivElement): void {
   let pendingStageEmote: AssistantEventEmoteId | null = null
   let pendingRuntimeStatus: AssistantRuntimeStatus | null = null
   let pluginSettings: ElizaPluginSettings | null = null
-  const announcedWorkflowApprovalSteps = new Set<string>()
+  const pendingPluginInstallConfirmations = new Map<string, string>()
   let isSettingsVisible = false
   let isSavingSettings = false
+  let isApplyingRuntimeChanges = false
+  let isRuntimeReloadPending = false
+  let settingsStatusMessage = ''
   let unsubscribeAssistantEvents: (() => void) | null = null
 
   const bubbleWindowLayout = createBubbleWindowLayoutController({
@@ -295,6 +364,37 @@ export function renderApp(root: HTMLDivElement): void {
     syncBubbleWindowLayout()
   }
 
+  const rememberWorkflowRun = (
+    run: BonziWorkflowRunSnapshot
+  ): BonziWorkflowRunSnapshot => {
+    const existing = workflowRunsById.get(run.id)
+
+    if (existing && existing.revision >= run.revision) {
+      return existing
+    }
+
+    workflowRunsById.set(run.id, run)
+
+    for (const entry of conversation) {
+      if (entry.workflowRun?.id === run.id) {
+        entry.workflowRun = run
+      }
+    }
+
+    return run
+  }
+
+  const applyWorkflowRunUpdate = (run: BonziWorkflowRunSnapshot): boolean => {
+    const existing = workflowRunsById.get(run.id)
+
+    if (existing && existing.revision >= run.revision) {
+      return false
+    }
+
+    rememberWorkflowRun(run)
+    return true
+  }
+
   const hydrateConversation = (messages: AssistantMessage[]): void => {
     conversation.splice(
       0,
@@ -336,13 +436,47 @@ export function renderApp(root: HTMLDivElement): void {
       return
     }
 
+    const previousEnabledById = new Map(
+      (pluginSettings?.installedPlugins ?? []).map((plugin) => [
+        plugin.id,
+        plugin.enabled
+      ])
+    )
+
     isSavingSettings = true
     rerenderPluginSettings()
     setSettingsStatus(pendingStatus)
 
     try {
-      pluginSettings = await window.bonzi.settings.updateElizaPlugins(request)
-      setSettingsStatus('Saved. Bonzi will reload elizaOS before the next assistant turn.')
+      await window.bonzi.settings.updateElizaPlugins(request)
+      await hydratePluginSettings({ preserveStatus: true })
+
+      const enabledChanged = request.operations.some((operation) => {
+        if (operation.type !== 'set-enabled') {
+          return false
+        }
+
+        const previousEnabled = previousEnabledById.get(operation.id)
+        const nextEnabled = pluginSettings?.installedPlugins.find(
+          (plugin) => plugin.id === operation.id
+        )?.enabled
+
+        return (
+          typeof previousEnabled === 'boolean' &&
+          typeof nextEnabled === 'boolean' &&
+          previousEnabled !== nextEnabled
+        )
+      })
+
+      if (enabledChanged) {
+        setRuntimeReloadPending(true)
+      }
+
+      setSettingsStatus(
+        enabledChanged
+          ? 'Saved plugin settings.'
+          : 'Saved plugin settings. Discovery inventory refreshed.'
+      )
       const nextShellState = await window.bonzi.app.getShellState()
       applyShellState(nextShellState)
     } catch (error) {
@@ -437,20 +571,8 @@ export function renderApp(root: HTMLDivElement): void {
         pendingStageEmote = event.emoteId
         return
       case 'workflow-run-updated':
-        for (const step of event.run.steps) {
-          if (step.status !== 'awaiting_approval') {
-            continue
-          }
-
-          const key = `${event.run.id}:${step.id}`
-          if (announcedWorkflowApprovalSteps.has(key)) {
-            continue
-          }
-
-          announcedWorkflowApprovalSteps.add(key)
-          appendSystemMessage(
-            `Workflow approval requested: ${step.approvalPrompt ?? step.title}. Approval UI is not available yet; Bonzi will decline automatically if no response is provided.`
-          )
+        if (applyWorkflowRunUpdate(event.run)) {
+          rerenderConversation()
         }
         return
     }
@@ -481,6 +603,147 @@ export function renderApp(root: HTMLDivElement): void {
     rerenderConversation()
   }
 
+  const installDiscoveredPlugin = async (pluginId: string): Promise<void> => {
+    if (!window.bonzi || isSavingSettings || !pluginSettings) {
+      return
+    }
+
+    const availablePlugin = pluginSettings.availablePlugins.find(
+      (plugin) => plugin.id === pluginId
+    )
+
+    if (!availablePlugin || isElizaOptionalPluginId(pluginId)) {
+      return
+    }
+
+    if (!availablePlugin.packageName) {
+      setSettingsStatus('Cannot install this plugin because registry metadata did not include a package name.')
+      return
+    }
+
+    const pendingConfirmationOperationId = pendingPluginInstallConfirmations.get(pluginId)
+
+    isSavingSettings = true
+    rerenderPluginSettings()
+
+    try {
+      if (!pendingConfirmationOperationId) {
+        const previewResult = await window.bonzi.plugins.install({
+          id: availablePlugin.id,
+          pluginId: availablePlugin.id,
+          packageName: availablePlugin.packageName,
+          versionRange: availablePlugin.version,
+          confirmed: false
+        })
+
+        setSettingsStatus(previewResult.message)
+
+        if (previewResult.confirmationRequired) {
+          pendingPluginInstallConfirmations.set(
+            pluginId,
+            previewResult.operation.operationId
+          )
+          setSettingsStatus(
+            'Install preview ready. Click Install again to confirm this third-party plugin install.'
+          )
+        }
+
+        await hydratePluginSettings({ preserveStatus: true })
+        return
+      }
+
+      const confirmed = window.confirm(
+        `Install plugin "${availablePlugin.name}" now? This will run a package install command in the Bonzi workspace.`
+      )
+
+      if (!confirmed) {
+        setSettingsStatus('Install cancelled.')
+        return
+      }
+
+      const previousEnabled =
+        pluginSettings.installedPlugins.find((plugin) => plugin.id === pluginId)
+          ?.enabled ?? false
+      const installResult = await window.bonzi.plugins.install({
+        id: availablePlugin.id,
+        pluginId: availablePlugin.id,
+        packageName: availablePlugin.packageName,
+        versionRange: availablePlugin.version,
+        confirmed: true,
+        confirmationOperationId: pendingConfirmationOperationId
+      })
+
+      pendingPluginInstallConfirmations.delete(pluginId)
+      setSettingsStatus(installResult.message)
+      await hydratePluginSettings({ preserveStatus: true })
+
+      const nextEnabled =
+        pluginSettings?.installedPlugins.find((plugin) => plugin.id === pluginId)
+          ?.enabled ?? false
+
+      if (previousEnabled !== nextEnabled) {
+        setRuntimeReloadPending(true)
+      }
+    } catch (error) {
+      setSettingsStatus(`Failed to install plugin: ${String(error)}`)
+      pendingPluginInstallConfirmations.delete(pluginId)
+      await hydratePluginSettings({ preserveStatus: true })
+    } finally {
+      isSavingSettings = false
+      rerenderPluginSettings()
+    }
+  }
+
+  const uninstallInstalledPlugin = async (pluginId: string): Promise<void> => {
+    if (!window.bonzi || isSavingSettings || !pluginSettings) {
+      return
+    }
+
+    const installedPlugin = pluginSettings.installedPlugins.find(
+      (plugin) => plugin.id === pluginId
+    )
+
+    if (!installedPlugin || !installedPlugin.removable) {
+      return
+    }
+
+    const confirmed = window.confirm(
+      `Uninstall plugin "${installedPlugin.name}"? This removes the package from Bonzi workspace dependencies.`
+    )
+
+    if (!confirmed) {
+      return
+    }
+
+    const previousEnabled = installedPlugin.enabled
+
+    isSavingSettings = true
+    rerenderPluginSettings()
+    setSettingsStatus('Uninstalling plugin…')
+
+    try {
+      const uninstallResult = await window.bonzi.plugins.uninstall({
+        id: installedPlugin.id,
+        pluginId: installedPlugin.id,
+        packageName: installedPlugin.packageName,
+        confirmed: true
+      })
+
+      setSettingsStatus(uninstallResult.message)
+      await hydratePluginSettings({ preserveStatus: true })
+
+      if (uninstallResult.ok && previousEnabled) {
+        setRuntimeReloadPending(true)
+      }
+    } catch (error) {
+      setSettingsStatus(`Failed to uninstall plugin: ${String(error)}`)
+      await hydratePluginSettings({ preserveStatus: true })
+    } finally {
+      isSavingSettings = false
+      rerenderPluginSettings()
+    }
+  }
+
   minimizeButton.addEventListener('click', () => {
     if (!window.bonzi) {
       return
@@ -506,6 +769,29 @@ export function renderApp(root: HTMLDivElement): void {
     setSettingsVisible(false)
   })
 
+  applyRuntimeChangesButton.addEventListener('click', async () => {
+    if (!window.bonzi || isApplyingRuntimeChanges) {
+      return
+    }
+
+    isApplyingRuntimeChanges = true
+    syncSettingsStatusUi()
+    setSettingsStatus('Reloading elizaOS runtime…')
+
+    try {
+      await window.bonzi.assistant.reloadRuntime()
+      setRuntimeReloadPending(false)
+      setSettingsStatus('Runtime reload complete.')
+      const nextShellState = await window.bonzi.app.getShellState()
+      applyShellState(nextShellState)
+    } catch (error) {
+      setSettingsStatus(`Runtime reload failed: ${String(error)}`)
+    } finally {
+      isApplyingRuntimeChanges = false
+      syncSettingsStatusUi()
+    }
+  })
+
   pluginSettingsEl.addEventListener('change', async (event) => {
     const target = event.target
 
@@ -515,7 +801,7 @@ export function renderApp(root: HTMLDivElement): void {
 
     const pluginId = target.dataset.pluginToggle
 
-    if (!pluginId || !isElizaOptionalPluginId(pluginId) || !pluginSettings) {
+    if (!pluginId || !pluginSettings) {
       return
     }
 
@@ -523,7 +809,7 @@ export function renderApp(root: HTMLDivElement): void {
       (candidate) => candidate.id === pluginId
     )
 
-    if (!plugin?.configurable) {
+    if (!plugin || plugin.required || (!plugin.configurable && !plugin.removable)) {
       return
     }
 
@@ -548,8 +834,23 @@ export function renderApp(root: HTMLDivElement): void {
       return
     }
 
+    const installButton = target.closest<HTMLButtonElement>('[data-plugin-install]')
+    const uninstallButton = target.closest<HTMLButtonElement>(
+      '[data-plugin-uninstall]'
+    )
     const addButton = target.closest<HTMLButtonElement>('[data-plugin-add]')
     const removeButton = target.closest<HTMLButtonElement>('[data-plugin-remove]')
+
+    if (installButton?.dataset.pluginInstall) {
+      await installDiscoveredPlugin(installButton.dataset.pluginInstall)
+      return
+    }
+
+    if (uninstallButton?.dataset.pluginUninstall) {
+      await uninstallInstalledPlugin(uninstallButton.dataset.pluginUninstall)
+      return
+    }
+
     const pluginId = addButton?.dataset.pluginAdd ?? removeButton?.dataset.pluginRemove
 
     if (!pluginId || !isElizaOptionalPluginId(pluginId)) {
@@ -624,6 +925,22 @@ export function renderApp(root: HTMLDivElement): void {
 
       if (response.ok && response.reply) {
         addAssistantTurn(conversation, response)
+
+        if (response.workflowRun) {
+          const existingWorkflowRun = workflowRunsById.get(response.workflowRun.id)
+          const latestWorkflowRun = rememberWorkflowRun(
+            existingWorkflowRun && existingWorkflowRun.revision > response.workflowRun.revision
+              ? existingWorkflowRun
+              : response.workflowRun
+          )
+          const latestEntry = conversation.at(-1)
+
+          if (latestEntry && !latestEntry.workflowRun) {
+            latestEntry.workflowRun = latestWorkflowRun
+          } else if (latestEntry?.workflowRun?.id === latestWorkflowRun.id) {
+            latestEntry.workflowRun = latestWorkflowRun
+          }
+        }
       } else {
         appendSystemMessage(
           response.error ??
@@ -654,6 +971,90 @@ export function renderApp(root: HTMLDivElement): void {
     const target = event.target
 
     if (!(target instanceof HTMLElement)) {
+      return
+    }
+
+    const workflowApprovalButton = target.closest<HTMLButtonElement>(
+      '[data-workflow-approve], [data-workflow-decline]'
+    )
+
+    if (workflowApprovalButton) {
+      const runId = workflowApprovalButton.dataset.workflowRunId
+      const stepId = workflowApprovalButton.dataset.workflowStepId
+      const approved = workflowApprovalButton.hasAttribute('data-workflow-approve')
+
+      if (!runId || !stepId) {
+        return
+      }
+
+      const siblingButtons = chatLogEl.querySelectorAll<HTMLButtonElement>(
+        '[data-workflow-run-id][data-workflow-step-id]'
+      )
+      siblingButtons.forEach((button) => {
+        if (
+          button.dataset.workflowRunId === runId &&
+          button.dataset.workflowStepId === stepId
+        ) {
+          button.disabled = true
+        }
+      })
+
+      try {
+        const response = await window.bonzi.assistant.respondWorkflowApproval({
+          runId,
+          stepId,
+          approved
+        })
+
+        if (response.run) {
+          if (applyWorkflowRunUpdate(response.run)) {
+            rerenderConversation()
+          }
+        }
+
+        if (!response.ok) {
+          appendSystemMessage(response.message)
+        }
+      } catch (error) {
+        appendSystemMessage(`Workflow approval failed: ${String(error)}`)
+      } finally {
+        rerenderConversation()
+      }
+
+      return
+    }
+
+    const workflowCancelButton = target.closest<HTMLButtonElement>(
+      '[data-workflow-cancel]'
+    )
+
+    if (workflowCancelButton) {
+      const runId = workflowCancelButton.dataset.workflowRunId
+
+      if (!runId) {
+        return
+      }
+
+      workflowCancelButton.disabled = true
+
+      try {
+        const response = await window.bonzi.assistant.cancelWorkflowRun({ runId })
+
+        if (response.run) {
+          if (applyWorkflowRunUpdate(response.run)) {
+            rerenderConversation()
+          }
+        }
+
+        if (!response.ok) {
+          appendSystemMessage(response.message)
+        }
+      } catch (error) {
+        appendSystemMessage(`Workflow cancel failed: ${String(error)}`)
+      } finally {
+        rerenderConversation()
+      }
+
       return
     }
 
@@ -810,7 +1211,7 @@ export function renderApp(root: HTMLDivElement): void {
       await Promise.allSettled([
         window.bonzi.app.getShellState(),
         window.bonzi.assistant.getHistory(),
-        window.bonzi.settings.getElizaPlugins()
+        discoverPluginSettings()
       ])
 
     if (shellStateResult.status === 'rejected') {

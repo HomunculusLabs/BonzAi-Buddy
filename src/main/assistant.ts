@@ -76,7 +76,8 @@ export function createAssistantService(
   options: AssistantServiceOptions
 ): AssistantService {
   const runtimeManager = new BonziRuntimeManager({
-    getShellState: options.getShellState
+    getShellState: options.getShellState,
+    getCompanionWindow: options.getCompanionWindow
   })
   const pendingActions = new Map<string, AssistantAction>()
 

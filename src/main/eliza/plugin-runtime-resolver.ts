@@ -15,7 +15,10 @@ import {
   type BonziPersistedPluginRecordSnapshot
 } from './plugin-settings'
 import type { BonziWorkflowManager } from './workflow-manager'
-import { instrumentPluginActionsForWorkflow } from './workflow-action-instrumentation'
+import {
+  instrumentPluginActionsForWorkflow,
+  type WorkflowBonziDesktopActionGateway
+} from './workflow-action-instrumentation'
 
 interface BonziPluginRuntimeResolverOptions {
   settingsStore?: BonziPluginSettingsStore
@@ -23,6 +26,7 @@ interface BonziPluginRuntimeResolverOptions {
   userDataDir?: string
   env?: NodeJS.ProcessEnv
   workflowManager?: BonziWorkflowManager
+  bonziDesktopActionGateway?: WorkflowBonziDesktopActionGateway
 }
 
 export interface BonziRuntimePluginSelectionMetadata {
@@ -45,6 +49,7 @@ export class BonziPluginRuntimeResolver {
   private readonly settingsStore: BonziPluginSettingsStore
   private readonly workspaceDir: string
   private readonly workflowManager: BonziWorkflowManager | null
+  private readonly bonziDesktopActionGateway: WorkflowBonziDesktopActionGateway | null
 
   constructor(options: BonziPluginRuntimeResolverOptions = {}) {
     this.settingsStore = options.settingsStore ?? new BonziPluginSettingsStore()
@@ -54,6 +59,7 @@ export class BonziPluginRuntimeResolver {
       userDataDir: options.userDataDir ?? app.getPath('userData')
     })
     this.workflowManager = options.workflowManager ?? null
+    this.bonziDesktopActionGateway = options.bonziDesktopActionGateway ?? null
   }
 
   getRuntimeSelectionMetadata(): BonziRuntimePluginSelectionMetadata[] {
@@ -116,7 +122,8 @@ export class BonziPluginRuntimeResolver {
               plugin: selected.plugin,
               pluginId: item.id,
               executionPolicy: item.executionPolicy,
-              workflowManager: this.workflowManager
+              workflowManager: this.workflowManager,
+              bonziDesktopActionGateway: this.bonziDesktopActionGateway ?? undefined
             })
           : selected.plugin
 

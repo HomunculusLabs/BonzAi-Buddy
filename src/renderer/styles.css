@@ -649,11 +649,124 @@ p {
   color: rgba(101, 77, 176, 0.9);
 }
 
+.workflow-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 11px;
+  border-radius: 14px;
+  background: rgba(77, 54, 146, 0.08);
+  border: 1px solid rgba(86, 67, 153, 0.14);
+}
+
+.workflow-card__header,
+.workflow-card__step-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workflow-card__header {
+  color: rgba(38, 29, 66, 0.94);
+}
+
+.workflow-card__run-status,
+.workflow-card__step-status {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(101, 77, 176, 0.14);
+  color: rgba(82, 62, 146, 0.92);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.workflow-card__summary,
+.workflow-card__current,
+.workflow-card__step p,
+.workflow-card__approval-prompt,
+.workflow-card__error {
+  font-size: 0.77rem;
+  line-height: 1.35;
+  color: rgba(69, 54, 109, 0.84);
+}
+
+.workflow-card__error {
+  color: rgba(141, 36, 55, 0.9);
+}
+
+.workflow-card__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 16px;
+}
+
+.workflow-card__step {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workflow-card__step--current {
+  padding: 6px 7px;
+  margin-left: -7px;
+  border-radius: 10px;
+  background: rgba(143, 120, 225, 0.13);
+}
+
+.workflow-card__step--empty {
+  color: rgba(82, 62, 146, 0.8);
+  font-size: 0.75rem;
+  list-style: none;
+  margin-left: -16px;
+}
+
+.workflow-card__controls {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workflow-button {
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 10px;
+  font-size: 0.74rem;
+}
+
+.workflow-button--approve {
+  background: rgba(108, 214, 153, 0.18);
+  border-color: rgba(36, 138, 87, 0.34);
+}
+
+.workflow-button--decline,
+.workflow-button--cancel {
+  background: rgba(255, 108, 108, 0.12);
+  border-color: rgba(167, 42, 65, 0.28);
+}
+
 .speech-bubble .ghost-button {
   color: rgba(48, 37, 88, 0.94);
   background: rgba(255, 255, 255, 0.64);
   border-color: rgba(93, 72, 163, 0.18);
   box-shadow: none;
+}
+
+.speech-bubble .workflow-button--approve {
+  background: rgba(108, 214, 153, 0.22);
+  border-color: rgba(36, 138, 87, 0.34);
+}
+
+.speech-bubble .workflow-button--decline,
+.speech-bubble .workflow-button--cancel {
+  background: rgba(255, 108, 108, 0.16);
+  border-color: rgba(167, 42, 65, 0.3);
 }
 
 .typing-dots::after {

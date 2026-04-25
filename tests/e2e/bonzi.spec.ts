@@ -77,6 +77,14 @@ test('boots and completes an assistant roundtrip through the real Electron app',
   }
 })
 
+test.fixme(
+  'renders workflow progress + approval controls in renderer',
+  async () => {
+    // TODO: Add coverage once BONZI_E2E_MODE can emit workflow-run-updated events
+    // and sendCommand responses with workflowRun snapshots.
+  }
+)
+
 test('manages bundled optional plugins from settings catalog', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-plugins-'))
   const env = {
@@ -345,6 +353,15 @@ test('discovers plugins from registry endpoint via preload bridge', async () => 
     expect(incompatibleLegacy?.warnings ?? []).toContain(
       'Registry marked this plugin as incompatible.'
     )
+
+    await window.locator('[data-action="settings"]').click()
+    const weatherDiscoverRow = window.locator(
+      '[data-plugin-id="weather"][data-plugin-available="true"]'
+    )
+    await expect(weatherDiscoverRow).toBeVisible()
+    await expect(
+      weatherDiscoverRow.locator('[data-plugin-install="weather"]')
+    ).toBeVisible()
 
     const cache = JSON.parse(
       await readFile(

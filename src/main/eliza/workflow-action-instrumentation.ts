@@ -6,15 +6,37 @@ import type {
   Plugin,
   Content
 } from '@elizaos/core/node'
-import type { ElizaPluginExecutionPolicy } from '../../shared/contracts'
-import { normalizeText } from '../assistant-action-param-utils'
+import {
+  ASSISTANT_ACTION_TYPES,
+  type AssistantActionParams,
+  type AssistantActionType,
+  type ElizaPluginExecutionPolicy
+} from '../../shared/contracts'
+import {
+  normalizeText,
+  sanitizeAssistantActionParams
+} from '../assistant-action-param-utils'
 import type { BonziWorkflowManager } from './workflow-manager'
+
+export interface WorkflowBonziDesktopActionProposal {
+  type: AssistantActionType
+  requiresConfirmation?: boolean
+  params?: AssistantActionParams
+}
+
+export interface WorkflowBonziDesktopActionGateway {
+  execute: (input: {
+    proposal: WorkflowBonziDesktopActionProposal
+    approved: boolean
+  }) => Promise<string>
+}
 
 interface WorkflowActionInstrumentationOptions {
   plugin: Plugin
   pluginId: string
   executionPolicy: ElizaPluginExecutionPolicy
   workflowManager: BonziWorkflowManager
+  bonziDesktopActionGateway?: WorkflowBonziDesktopActionGateway
 }
 
 export function instrumentPluginActionsForWorkflow(
@@ -31,7 +53,8 @@ export function instrumentPluginActionsForWorkflow(
       action,
       pluginId: options.pluginId,
       executionPolicy: options.executionPolicy,
-      workflowManager: options.workflowManager
+      workflowManager: options.workflowManager,
+      bonziDesktopActionGateway: options.bonziDesktopActionGateway
     })
   )
 
@@ -46,8 +69,15 @@ function wrapActionForWorkflow(options: {
   pluginId: string
   executionPolicy: ElizaPluginExecutionPolicy
   workflowManager: BonziWorkflowManager
+  bonziDesktopActionGateway?: WorkflowBonziDesktopActionGateway
 }): Action {
-  const { action, pluginId, executionPolicy, workflowManager } = options
+  const {
+    action,
+    pluginId,
+    executionPolicy,
+    workflowManager,
+    bonziDesktopActionGateway
+  } = options
   const originalHandler = action.handler
 
   return {
@@ -145,6 +175,19 @@ function wrapActionForWorkflow(options: {
           return result
         }
 
+        const bonziWorkflowResult = await maybeHandleWorkflowBonziProposal({
+          result,
+          runId: activeRunId,
+          stepId,
+          executionPolicy,
+          workflowManager,
+          bonziDesktopActionGateway
+        })
+
+        if (bonziWorkflowResult) {
+          return bonziWorkflowResult
+        }
+
         if (result?.success === false) {
           safeFailStep(
             workflowManager,
@@ -187,6 +230,134 @@ function normalizeActionErrorDetail(result: ActionResult): string {
         : ''
 
   return normalizeText(errorText) || normalizeText(result.text) || 'Action failed.'
+}
+
+async function maybeHandleWorkflowBonziProposal(input: {
+  result: ActionResult | undefined
+  runId: string
+  stepId: string
+  executionPolicy: ElizaPluginExecutionPolicy
+  workflowManager: BonziWorkflowManager
+  bonziDesktopActionGateway?: WorkflowBonziDesktopActionGateway
+}): Promise<ActionResult | null> {
+  if (
+    !input.result ||
+    input.result.success === false ||
+    !input.bonziDesktopActionGateway
+  ) {
+    return null
+  }
+
+  const proposal = extractWorkflowBonziDesktopActionProposal(input.result)
+
+  if (!proposal) {
+    return null
+  }
+
+  const rawProposal = isRecord(input.result.data?.bonziProposedAction)
+    ? input.result.data.bonziProposedAction
+    : null
+  const title = normalizeText(rawProposal?.title)
+  const shouldRequestApproval =
+    proposal.requiresConfirmation === true ||
+    proposal.type === 'close-window' ||
+    input.executionPolicy === 'confirm_each_action'
+
+  const approved = shouldRequestApproval
+    ? await input.workflowManager.requestStepApproval({
+        runId: input.runId,
+        stepId: input.stepId,
+        prompt: `Allow workflow Bonzi action${title ? ` "${title}"` : ''}?`
+      })
+    : true
+
+  if (!approved) {
+    const deniedMessage =
+      'Workflow approval denied. Bonzi desktop action was not executed.'
+
+    safeSkipStep(
+      input.workflowManager,
+      input.runId,
+      input.stepId,
+      deniedMessage
+    )
+
+    return {
+      ...input.result,
+      success: false,
+      text: deniedMessage,
+      error: deniedMessage
+    }
+  }
+
+  try {
+    const executionMessage = await input.bonziDesktopActionGateway.execute({
+      proposal,
+      approved
+    })
+
+    safeCompleteStep(
+      input.workflowManager,
+      input.runId,
+      input.stepId,
+      normalizeText(executionMessage)
+    )
+
+    return {
+      ...input.result,
+      success: true,
+      text: normalizeText(executionMessage) || 'Bonzi desktop action executed.',
+      data: {
+        ...(isRecord(input.result.data) ? input.result.data : {}),
+        bonziActionExecuted: true
+      }
+    }
+  } catch (error) {
+    const failureMessage = normalizeError(error)
+    safeFailStep(
+      input.workflowManager,
+      input.runId,
+      input.stepId,
+      failureMessage
+    )
+
+    return {
+      ...input.result,
+      success: false,
+      text: failureMessage,
+      error: failureMessage,
+      data: {
+        ...(isRecord(input.result.data) ? input.result.data : {}),
+        bonziActionExecuted: false
+      }
+    }
+  }
+}
+
+function extractWorkflowBonziDesktopActionProposal(
+  result: ActionResult | undefined
+): WorkflowBonziDesktopActionProposal | null {
+  if (!result) {
+    return null
+  }
+  const rawProposal = result.data?.bonziProposedAction
+
+  if (!isRecord(rawProposal) || !isAssistantActionType(rawProposal.type)) {
+    return null
+  }
+
+  const params =
+    sanitizeAssistantActionParams(rawProposal.params) ??
+    sanitizeAssistantActionParams(result.data?.bonziActionParams)
+
+  return {
+    type: rawProposal.type,
+    requiresConfirmation:
+      typeof rawProposal.requiresConfirmation === 'boolean'
+        ? rawProposal.requiresConfirmation
+        : undefined,
+    ...(params ? { params } : {})
+  }
 }
 
 function buildPolicyFailureResult(message: string): ActionResult {
@@ -287,4 +458,15 @@ function normalizeError(error: unknown): string {
   }
 
   return String(error)
+}
+
+function isAssistantActionType(value: unknown): value is AssistantActionType {
+  return (
+    typeof value === 'string' &&
+    (ASSISTANT_ACTION_TYPES as readonly string[]).includes(value)
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
