@@ -27,7 +27,8 @@ function getShellState() {
   return buildShellState(
     assistantService.getProviderInfo(),
     assistantService.getStartupWarnings(),
-    assistantService.getRuntimeStatus()
+    assistantService.getRuntimeStatus(),
+    assistantService.getAvailableActionTypes()
   )
 }
 

@@ -12,6 +12,53 @@ export interface AssistantRuntimeStatus {
   lastError?: string
 }
 
+export const ELIZA_OPTIONAL_PLUGIN_IDS = [
+  'bonzi-context',
+  'bonzi-desktop-actions'
+] as const
+
+export const ELIZA_REQUIRED_PLUGIN_IDS = ['localdb', 'provider'] as const
+
+export type ElizaOptionalPluginId = (typeof ELIZA_OPTIONAL_PLUGIN_IDS)[number]
+
+export type ElizaRequiredPluginId = (typeof ELIZA_REQUIRED_PLUGIN_IDS)[number]
+
+export type ElizaPluginId = ElizaRequiredPluginId | ElizaOptionalPluginId
+
+export interface ElizaInstalledPluginEntry {
+  id: ElizaPluginId
+  name: string
+  packageName?: string
+  description: string
+  enabled: boolean
+  required: boolean
+  configurable: boolean
+  removable: boolean
+}
+
+export interface ElizaAvailablePluginEntry {
+  id: ElizaOptionalPluginId
+  name: string
+  packageName?: string
+  description: string
+}
+
+export type ElizaPluginSettingsEntry = ElizaInstalledPluginEntry
+
+export interface ElizaPluginSettings {
+  installedPlugins: ElizaInstalledPluginEntry[]
+  availablePlugins: ElizaAvailablePluginEntry[]
+}
+
+export type UpdateElizaPluginSettingsOperation =
+  | { type: 'set-enabled'; id: ElizaOptionalPluginId; enabled: boolean }
+  | { type: 'add'; id: ElizaOptionalPluginId }
+  | { type: 'remove'; id: ElizaOptionalPluginId }
+
+export interface UpdateElizaPluginSettingsRequest {
+  operations: UpdateElizaPluginSettingsOperation[]
+}
+
 export type AssistantMessageRole = 'user' | 'assistant' | 'system'
 
 export interface AssistantMessage {
@@ -25,7 +72,14 @@ export const ASSISTANT_ACTION_TYPES = [
   'report-shell-state',
   'copy-vrm-asset-path',
   'minimize-window',
-  'close-window'
+  'close-window',
+  'open-url',
+  'search-web',
+  'cua-check-status',
+  'discord-snapshot',
+  'discord-read-screenshot',
+  'discord-scroll',
+  'discord-type-draft'
 ] as const
 
 export type AssistantActionType = (typeof ASSISTANT_ACTION_TYPES)[number]
@@ -36,6 +90,14 @@ export type AssistantActionStatus =
   | 'completed'
   | 'failed'
 
+export interface AssistantActionParams {
+  url?: string
+  query?: string
+  direction?: 'up' | 'down'
+  amount?: number
+  text?: string
+}
+
 export interface AssistantAction {
   id: string
   type: AssistantActionType
@@ -43,6 +105,7 @@ export interface AssistantAction {
   description: string
   requiresConfirmation: boolean
   status: AssistantActionStatus
+  params?: AssistantActionParams
   resultMessage?: string
 }
 

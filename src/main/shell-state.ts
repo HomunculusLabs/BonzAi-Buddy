@@ -11,7 +11,8 @@ export const VRM_ASSET_PATH = './static/7120171664031727876.vrm'
 export function buildShellState(
   provider: AssistantProviderInfo,
   warnings: string[],
-  runtime: AssistantRuntimeStatus
+  runtime: AssistantRuntimeStatus,
+  availableActions = [...ASSISTANT_ACTION_TYPES]
 ): ShellState {
   return {
     stage: shellStageForRuntime(runtime),
@@ -24,7 +25,7 @@ export function buildShellState(
     ],
     assistant: {
       provider,
-      availableActions: [...ASSISTANT_ACTION_TYPES],
+      availableActions,
       warnings,
       runtime
     }

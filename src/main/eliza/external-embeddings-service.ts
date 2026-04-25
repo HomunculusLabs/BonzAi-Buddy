@@ -7,27 +7,35 @@ import {
 } from 'node:http'
 import {
   DEFAULT_ELIZA_EMBEDDING_DIMENSION,
-  isElizaCompatibleEmbeddingDimension,
   type ElizaCompatibleEmbeddingDimension
 } from './embedding-dimensions'
+import {
+  listenOnLoopback,
+  readJsonRequestBody,
+  RequestBodyTooLargeError,
+  writeJson,
+  writeOpenAiStyleError
+} from './external-embeddings-http'
+import {
+  probeExternalEmbeddingsUpstream,
+  requestUpstreamEmbeddingsRaw,
+  UpstreamEmbeddingsError,
+  type BonziEmbeddingsUpstreamDimensionStrategy,
+  type ExternalEmbeddingsProbeResult,
+  type ExternalEmbeddingsUpstreamConfig
+} from './external-embeddings-upstream'
 
-const DEFAULT_EMBEDDINGS_SERVICE_TIMEOUT_MS = 30_000
-const MAX_REQUEST_BODY_BYTES = 1_000_000
+export {
+  probeExternalEmbeddingsUpstream,
+  type BonziEmbeddingsUpstreamDimensionStrategy,
+  type EmbeddingsResponseTransform,
+  type ExternalEmbeddingsProbeResult
+} from './external-embeddings-upstream'
 
-export type BonziEmbeddingsUpstreamDimensionStrategy =
-  | 'strict'
-  | 'matryoshka-truncate'
-
-type EmbeddingsResponseTransform = 'none' | 'matryoshka-truncate'
-
-export interface BonziExternalEmbeddingsServiceConfig {
-  upstreamBaseUrl: string
-  upstreamModel: string
-  upstreamApiKey?: string
-  dimensionStrategy: BonziEmbeddingsUpstreamDimensionStrategy
+export interface BonziExternalEmbeddingsServiceConfig
+  extends ExternalEmbeddingsUpstreamConfig {
   bindHost: '127.0.0.1'
   port: number
-  timeoutMs: number
 }
 
 export interface ResolvedEmbeddingRuntimeSettings {
@@ -36,77 +44,6 @@ export interface ResolvedEmbeddingRuntimeSettings {
   apiKey?: string
   dimensions: ElizaCompatibleEmbeddingDimension
   warning?: string
-}
-
-export interface ExternalEmbeddingsProbeResult {
-  expectedDimension: ElizaCompatibleEmbeddingDimension
-  upstreamDimension: number
-  actualDimension: ElizaCompatibleEmbeddingDimension
-  requestDimensionsToUpstream: boolean
-  responseTransform: EmbeddingsResponseTransform
-}
-
-interface RequestUpstreamEmbeddingsOptions {
-  includeDimensions?: boolean
-  inFlight?: Set<AbortController>
-}
-
-interface ValidatedEmbeddingsResponse {
-  payload: Record<string, unknown>
-  upstreamDimension: number
-  actualDimension: ElizaCompatibleEmbeddingDimension
-  responseTransform: EmbeddingsResponseTransform
-}
-
-class UpstreamEmbeddingsError extends Error {
-  readonly status: number
-  readonly responseBody: string
-
-  constructor(status: number, responseBody: string) {
-    super(`Upstream embeddings request failed: ${status} ${responseBody}`)
-    this.name = 'UpstreamEmbeddingsError'
-    this.status = status
-    this.responseBody = responseBody
-  }
-}
-
-export async function probeExternalEmbeddingsUpstream(
-  config: BonziExternalEmbeddingsServiceConfig,
-  expectedDimension: ElizaCompatibleEmbeddingDimension
-): Promise<ExternalEmbeddingsProbeResult> {
-  try {
-    const withDimensions = await requestUpstreamEmbeddings(config, expectedDimension, {
-      includeDimensions: true
-    })
-
-    return {
-      expectedDimension,
-      upstreamDimension: withDimensions.upstreamDimension,
-      actualDimension: withDimensions.actualDimension,
-      requestDimensionsToUpstream: true,
-      responseTransform: withDimensions.responseTransform
-    }
-  } catch (error) {
-    if (!(error instanceof UpstreamEmbeddingsError)) {
-      throw error
-    }
-
-    if (!shouldRetryWithoutDimensions(error)) {
-      throw error
-    }
-
-    const withoutDimensions = await requestUpstreamEmbeddings(config, expectedDimension, {
-      includeDimensions: false
-    })
-
-    return {
-      expectedDimension,
-      upstreamDimension: withoutDimensions.upstreamDimension,
-      actualDimension: withoutDimensions.actualDimension,
-      requestDimensionsToUpstream: false,
-      responseTransform: withoutDimensions.responseTransform
-    }
-  }
 }
 
 export class BonziExternalEmbeddingsService {
@@ -144,10 +81,8 @@ export class BonziExternalEmbeddingsService {
 
     await this.stop()
 
-    const probeResult = await probeExternalEmbeddingsUpstream(
-      config,
-      expectedDimension
-    )
+    const probeResult: ExternalEmbeddingsProbeResult =
+      await probeExternalEmbeddingsUpstream(config, expectedDimension)
 
     this.requestDimensionsToUpstream = probeResult.requestDimensionsToUpstream
     this.expectedDimension = probeResult.expectedDimension
@@ -336,262 +271,6 @@ export class BonziExternalEmbeddingsService {
       )
     }
   }
-}
-
-class RequestBodyTooLargeError extends Error {
-  constructor(limit: number) {
-    super(`Request body exceeded ${limit} bytes.`)
-    this.name = 'RequestBodyTooLargeError'
-  }
-}
-
-async function requestUpstreamEmbeddings(
-  config: BonziExternalEmbeddingsServiceConfig,
-  expectedDimension: ElizaCompatibleEmbeddingDimension,
-  options: RequestUpstreamEmbeddingsOptions = {}
-): Promise<ValidatedEmbeddingsResponse> {
-  const payload: Record<string, unknown> = {
-    model: config.upstreamModel,
-    input: 'Bonzi embeddings startup probe'
-  }
-
-  if (options.includeDimensions !== false) {
-    payload.dimensions = expectedDimension
-  }
-
-  return requestUpstreamEmbeddingsRaw(config, payload, {
-    ...options,
-    expectedDimension
-  })
-}
-
-async function requestUpstreamEmbeddingsRaw(
-  config: BonziExternalEmbeddingsServiceConfig,
-  payload: Record<string, unknown>,
-  options: RequestUpstreamEmbeddingsOptions & {
-    expectedDimension: ElizaCompatibleEmbeddingDimension
-  }
-): Promise<ValidatedEmbeddingsResponse> {
-  const controller = new AbortController()
-  options.inFlight?.add(controller)
-  const timeout = setTimeout(() => controller.abort(), config.timeoutMs)
-
-  try {
-    const response = await fetch(`${trimTrailingSlash(config.upstreamBaseUrl)}/embeddings`, {
-      method: 'POST',
-      headers: buildUpstreamHeaders(config.upstreamApiKey),
-      body: JSON.stringify(payload),
-      signal: controller.signal
-    })
-
-    if (!response.ok) {
-      const responseBody = await response.text().catch(() => 'Unknown upstream error')
-      throw new UpstreamEmbeddingsError(response.status, responseBody)
-    }
-
-    const json = (await response.json()) as unknown
-    return validateEmbeddingsResponse(json, {
-      expectedDimension: options.expectedDimension,
-      dimensionStrategy: config.dimensionStrategy
-    })
-  } finally {
-    clearTimeout(timeout)
-    options.inFlight?.delete(controller)
-  }
-}
-
-function buildUpstreamHeaders(
-  apiKey: string | undefined
-): Record<string, string> {
-  return {
-    'Content-Type': 'application/json',
-    ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
-  }
-}
-
-function shouldRetryWithoutDimensions(error: UpstreamEmbeddingsError): boolean {
-  if (error.status !== 400 && error.status !== 422) {
-    return false
-  }
-
-  const normalizedBody = error.responseBody.toLowerCase()
-  return (
-    normalizedBody.includes('dimensions') ||
-    normalizedBody.includes('dimension')
-  )
-}
-
-function validateEmbeddingsResponse(
-  payload: unknown,
-  options: {
-    expectedDimension: ElizaCompatibleEmbeddingDimension
-    dimensionStrategy: BonziEmbeddingsUpstreamDimensionStrategy
-  }
-): ValidatedEmbeddingsResponse {
-  if (!isRecord(payload)) {
-    throw new Error('External embeddings upstream returned a non-object payload.')
-  }
-
-  const data = payload.data
-  if (!Array.isArray(data) || data.length === 0) {
-    throw new Error('External embeddings upstream returned no embeddings.')
-  }
-
-  let actualDimension: number | null = null
-
-  for (const item of data) {
-    if (!isRecord(item) || !Array.isArray(item.embedding)) {
-      throw new Error('External embeddings upstream returned malformed embedding data.')
-    }
-
-    const embedding = item.embedding
-    if (embedding.some((value) => typeof value !== 'number' || !Number.isFinite(value))) {
-      throw new Error('External embeddings upstream returned non-numeric embeddings.')
-    }
-
-    if (actualDimension === null) {
-      actualDimension = embedding.length
-      continue
-    }
-
-    if (embedding.length !== actualDimension) {
-      throw new Error('External embeddings upstream returned inconsistent vector lengths.')
-    }
-  }
-
-  if (actualDimension === null) {
-    throw new Error('External embeddings upstream returned no usable embeddings.')
-  }
-
-  if (actualDimension === options.expectedDimension) {
-    return {
-      payload,
-      upstreamDimension: actualDimension,
-      actualDimension: options.expectedDimension,
-      responseTransform: 'none'
-    }
-  }
-
-  if (
-    options.dimensionStrategy === 'matryoshka-truncate' &&
-    actualDimension > options.expectedDimension
-  ) {
-    return {
-      payload: truncateEmbeddingsPayload(payload, options.expectedDimension),
-      upstreamDimension: actualDimension,
-      actualDimension: options.expectedDimension,
-      responseTransform: 'matryoshka-truncate'
-    }
-  }
-
-  if (!isElizaCompatibleEmbeddingDimension(actualDimension)) {
-    throw new Error(
-      `External embeddings startup failed: upstream returned unsupported dimension ${actualDimension}. Supported dimensions are 384, 512, 768, 1024, 1536, 3072.`
-    )
-  }
-
-  const truncationHint =
-    options.dimensionStrategy === 'matryoshka-truncate'
-      ? ' Matryoshka truncation only applies when the upstream returns more dimensions than requested.'
-      : ''
-
-  throw new Error(
-    `External embeddings startup failed: upstream returned ${actualDimension} dimensions, expected ${options.expectedDimension}.${truncationHint}`
-  )
-}
-
-function truncateEmbeddingsPayload(
-  payload: Record<string, unknown>,
-  expectedDimension: ElizaCompatibleEmbeddingDimension
-): Record<string, unknown> {
-  const data = Array.isArray(payload.data) ? payload.data : []
-
-  return {
-    ...payload,
-    data: data.map((item) => {
-      if (!isRecord(item) || !Array.isArray(item.embedding)) {
-        return item
-      }
-
-      return {
-        ...item,
-        embedding: item.embedding.slice(0, expectedDimension)
-      }
-    })
-  }
-}
-
-async function readJsonRequestBody(request: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = []
-  let total = 0
-
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-    total += buffer.length
-
-    if (total > MAX_REQUEST_BODY_BYTES) {
-      throw new RequestBodyTooLargeError(MAX_REQUEST_BODY_BYTES)
-    }
-
-    chunks.push(buffer)
-  }
-
-  const text = Buffer.concat(chunks).toString('utf8')
-  return JSON.parse(text)
-}
-
-function writeJson(
-  response: ServerResponse,
-  status: number,
-  payload: Record<string, unknown>
-): void {
-  response.statusCode = status
-  response.setHeader('Content-Type', 'application/json; charset=utf-8')
-  response.end(JSON.stringify(payload))
-}
-
-function writeOpenAiStyleError(
-  response: ServerResponse,
-  status: number,
-  message: string,
-  code: string
-): void {
-  writeJson(response, status, {
-    error: {
-      message,
-      type: 'invalid_request_error',
-      code
-    }
-  })
-}
-
-async function listenOnLoopback(
-  server: Server,
-  config: BonziExternalEmbeddingsServiceConfig
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error): void => {
-      server.off('listening', onListening)
-      reject(
-        new Error(
-          `External embeddings service failed to bind ${config.bindHost}:${config.port}: ${error.message}`
-        )
-      )
-    }
-
-    const onListening = (): void => {
-      server.off('error', onError)
-      resolve()
-    }
-
-    server.once('error', onError)
-    server.once('listening', onListening)
-    server.listen(config.port, config.bindHost)
-  })
-}
-
-function trimTrailingSlash(value: string): string {
-  return value.replace(/\/+$/u, '')
 }
 
 function fingerprintSecret(value: string | undefined): string {

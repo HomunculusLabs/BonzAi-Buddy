@@ -1,4 +1,4 @@
-import { clipboard, type BrowserWindow } from 'electron'
+import type { BrowserWindow } from 'electron'
 import {
   type AssistantAction,
   type AssistantActionExecutionRequest,
@@ -10,53 +10,29 @@ import {
   type AssistantMessage,
   type AssistantProviderInfo,
   type AssistantRuntimeStatus,
+  type ElizaPluginSettings,
+  type UpdateElizaPluginSettingsRequest,
   type ShellState
 } from '../shared/contracts'
-import {
-  BonziRuntimeManager,
-  type BonziProposedAction
-} from './eliza/runtime-manager'
+import { BonziRuntimeManager } from './eliza/runtime-manager'
+import { truncate } from './assistant-action-param-utils'
+import { executeAssistantAction } from './assistant-action-executor'
+import { createPendingAssistantAction } from './assistant-action-presentation'
 
 interface AssistantServiceOptions {
   getCompanionWindow: () => BrowserWindow | null
   getShellState: () => ShellState
 }
 
-const ACTION_DEFAULTS: Record<
-  AssistantActionType,
-  Omit<AssistantAction, 'id' | 'status' | 'resultMessage'>
-> = {
-  'report-shell-state': {
-    type: 'report-shell-state',
-    title: 'Report shell state',
-    description:
-      'Summarize the current platform, runtime stage, asset path, and active provider.',
-    requiresConfirmation: false
-  },
-  'copy-vrm-asset-path': {
-    type: 'copy-vrm-asset-path',
-    title: 'Copy VRM asset path',
-    description: 'Copy the bundled VRM asset path to the clipboard.',
-    requiresConfirmation: false
-  },
-  'minimize-window': {
-    type: 'minimize-window',
-    title: 'Minimize companion window',
-    description: 'Minimize the current Bonzi companion window.',
-    requiresConfirmation: false
-  },
-  'close-window': {
-    type: 'close-window',
-    title: 'Close companion window',
-    description: 'Close the current Bonzi companion window.',
-    requiresConfirmation: true
-  }
-}
-
 export interface AssistantService {
   getProviderInfo: () => AssistantProviderInfo
   getStartupWarnings: () => string[]
   getRuntimeStatus: () => AssistantRuntimeStatus
+  getPluginSettings: () => ElizaPluginSettings
+  updatePluginSettings: (
+    request: UpdateElizaPluginSettingsRequest
+  ) => Promise<ElizaPluginSettings>
+  getAvailableActionTypes: () => AssistantActionType[]
   getHistory: () => Promise<AssistantMessage[]>
   resetConversation: () => Promise<void>
   subscribe: (listener: (event: AssistantEvent) => void) => () => void
@@ -81,6 +57,9 @@ export function createAssistantService(
     getProviderInfo: () => runtimeManager.getProviderInfo(),
     getStartupWarnings: () => runtimeManager.getStartupWarnings(),
     getRuntimeStatus: () => runtimeManager.getRuntimeStatus(),
+    getPluginSettings: () => runtimeManager.getPluginSettings(),
+    updatePluginSettings: (request) => runtimeManager.updatePluginSettings(request),
+    getAvailableActionTypes: () => runtimeManager.getAvailableActionTypes(),
     getHistory: () => runtimeManager.getHistory(),
     async resetConversation(): Promise<void> {
       pendingActions.clear()
@@ -107,7 +86,7 @@ export function createAssistantService(
       try {
         const runtimeTurn = await runtimeManager.sendCommand(normalizedRequest.command)
         const actions = runtimeTurn.actions.map((action) => {
-          const pendingAction = createPendingAction(action)
+          const pendingAction = createPendingAssistantAction(action)
           pendingActions.set(pendingAction.id, pendingAction)
           return pendingAction
         })
@@ -178,11 +157,10 @@ export function createAssistantService(
       }
 
       try {
-        const message = executeAllowlistedAction(
-          action,
-          options.getShellState(),
-          options.getCompanionWindow()
-        )
+        const message = await executeAssistantAction(action, {
+          shellState: options.getShellState(),
+          companionWindow: options.getCompanionWindow()
+        })
 
         const completedAction: AssistantAction = {
           ...action,
@@ -191,6 +169,7 @@ export function createAssistantService(
         }
 
         pendingActions.set(completedAction.id, completedAction)
+        await runtimeManager.recordActionObservation(completedAction, message)
 
         return {
           ok: true,
@@ -206,6 +185,10 @@ export function createAssistantService(
         }
 
         pendingActions.set(failedAction.id, failedAction)
+        await runtimeManager.recordActionObservation(
+          failedAction,
+          failedAction.resultMessage ?? 'Action failed.'
+        )
 
         return {
           ok: false,
@@ -294,64 +277,8 @@ function createAssistantMessage(
   }
 }
 
-function createPendingAction(action: BonziProposedAction): AssistantAction {
-  const defaults = ACTION_DEFAULTS[action.type]
-
-  return {
-    id: crypto.randomUUID(),
-    type: action.type,
-    title: action.title?.trim() || defaults.title,
-    description: action.description?.trim() || defaults.description,
-    requiresConfirmation:
-      defaults.requiresConfirmation || action.requiresConfirmation === true,
-    status: 'pending'
-  }
-}
-
-function executeAllowlistedAction(
-  action: AssistantAction,
-  shellState: ShellState,
-  companionWindow: BrowserWindow | null
-): string {
-  switch (action.type) {
-    case 'report-shell-state':
-      return [
-        `Stage: ${shellState.stage}`,
-        `Platform: ${shellState.platform}`,
-        `VRM asset: ${shellState.vrmAssetPath}`,
-        `Provider: ${shellState.assistant.provider.label}`,
-        `Runtime: ${shellState.assistant.runtime.backend} / ${shellState.assistant.runtime.state}`
-      ].join('\n')
-    case 'copy-vrm-asset-path':
-      clipboard.writeText(shellState.vrmAssetPath)
-      return `Copied the bundled VRM asset path to the clipboard: ${shellState.vrmAssetPath}`
-    case 'minimize-window':
-      if (!companionWindow || companionWindow.isDestroyed()) {
-        throw new Error('Bonzi companion window is not available to minimize.')
-      }
-      companionWindow.minimize()
-      return 'Bonzi companion window minimized.'
-    case 'close-window':
-      if (!companionWindow || companionWindow.isDestroyed()) {
-        throw new Error('Bonzi companion window is not available to close.')
-      }
-      companionWindow.close()
-      return 'Bonzi companion window closed.'
-    default:
-      return assertNever(action.type)
-  }
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
-}
-
-function truncate(value: string, maxLength: number): string {
-  if (value.length <= maxLength) {
-    return value
-  }
-
-  return `${value.slice(0, maxLength - 1)}…`
 }
 
 function normalizeError(error: unknown): string {
@@ -360,8 +287,4 @@ function normalizeError(error: unknown): string {
   }
 
   return String(error)
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unsupported action: ${String(value)}`)
 }

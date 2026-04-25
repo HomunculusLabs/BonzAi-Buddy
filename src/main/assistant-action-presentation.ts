@@ -1,0 +1,102 @@
+import type {
+  AssistantAction,
+  AssistantActionType
+} from '../shared/contracts'
+import type { BonziProposedAction } from './eliza/runtime-manager'
+import { sanitizeAssistantActionParams } from './assistant-action-param-utils'
+
+const ACTION_DEFAULTS: Record<
+  AssistantActionType,
+  Omit<AssistantAction, 'id' | 'status' | 'resultMessage'>
+> = {
+  'report-shell-state': {
+    type: 'report-shell-state',
+    title: 'Report shell state',
+    description:
+      'Summarize the current platform, runtime stage, asset path, and active provider.',
+    requiresConfirmation: false
+  },
+  'copy-vrm-asset-path': {
+    type: 'copy-vrm-asset-path',
+    title: 'Copy VRM asset path',
+    description: 'Copy the bundled VRM asset path to the clipboard.',
+    requiresConfirmation: false
+  },
+  'minimize-window': {
+    type: 'minimize-window',
+    title: 'Minimize companion window',
+    description: 'Minimize the current Bonzi companion window.',
+    requiresConfirmation: false
+  },
+  'close-window': {
+    type: 'close-window',
+    title: 'Close companion window',
+    description: 'Close the current Bonzi companion window.',
+    requiresConfirmation: true
+  },
+  'open-url': {
+    type: 'open-url',
+    title: 'Open URL',
+    description: 'Open an http or https URL in the system default browser.',
+    requiresConfirmation: false
+  },
+  'search-web': {
+    type: 'search-web',
+    title: 'Search web',
+    description: 'Open a safely encoded web search in the system default browser.',
+    requiresConfirmation: false
+  },
+  'cua-check-status': {
+    type: 'cua-check-status',
+    title: 'Check Cua Driver status',
+    description:
+      'Check whether Cua Driver is installed, reachable, running, and has the required macOS permissions.',
+    requiresConfirmation: false
+  },
+  'discord-snapshot': {
+    type: 'discord-snapshot',
+    title: 'Inspect Discord',
+    description:
+      'Use Cua Driver to launch or find Discord and return a readable window snapshot. This does not send messages.',
+    requiresConfirmation: false
+  },
+  'discord-read-screenshot': {
+    type: 'discord-read-screenshot',
+    title: 'Read Discord screenshot',
+    description:
+      'Capture the Discord window screenshot and ask the configured OpenAI vision model to read it. This does not send messages.',
+    requiresConfirmation: false
+  },
+  'discord-scroll': {
+    type: 'discord-scroll',
+    title: 'Scroll Discord',
+    description:
+      'Use Cua Driver to scroll Discord up or down, then return a short follow-up snapshot. This does not send messages.',
+    requiresConfirmation: false
+  },
+  'discord-type-draft': {
+    type: 'discord-type-draft',
+    title: 'Type Discord draft',
+    description:
+      'Use Cua Driver to type a draft into Discord. This will not press Enter or send the message.',
+    requiresConfirmation: false
+  }
+}
+
+export function createPendingAssistantAction(
+  action: BonziProposedAction
+): AssistantAction {
+  const defaults = ACTION_DEFAULTS[action.type]
+  const params = sanitizeAssistantActionParams(action.params)
+
+  return {
+    id: crypto.randomUUID(),
+    type: action.type,
+    title: action.title?.trim() || defaults.title,
+    description: action.description?.trim() || defaults.description,
+    requiresConfirmation:
+      defaults.requiresConfirmation || action.requiresConfirmation === true,
+    status: 'pending',
+    ...(params ? { params } : {})
+  }
+}

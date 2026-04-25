@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import { app } from 'electron'
 import { join } from 'node:path'
 import {
@@ -7,15 +6,10 @@ import {
   createMessageMemory,
   LLMMode,
   stringToUuid,
-  type ActionResult,
   type Content,
   type Memory,
-  type Plugin,
-  type ProviderDataRecord,
   type UUID
 } from '@elizaos/core/node'
-import { elizaClassicPlugin } from '@elizaos/plugin-eliza-classic'
-import localdbPlugin from '@elizaos/plugin-localdb'
 import {
   ASSISTANT_ACTION_TYPES,
   type AssistantActionType,
@@ -24,27 +18,36 @@ import {
   type AssistantMessage,
   type AssistantProviderInfo,
   type AssistantRuntimeStatus,
-  type ShellState
+  type ElizaPluginSettings,
+  type ShellState,
+  type UpdateElizaPluginSettingsRequest
 } from '../../shared/contracts'
-import { createBonziCharacter } from './bonzi-character'
+import {
+  normalizeText
+} from '../assistant-action-param-utils'
+import { createBonziDesktopActionProposal } from './bonzi-desktop-actions-plugin'
 import {
   loadBonziElizaConfig,
   type BonziElizaResolvedConfig
 } from './config'
-import { createBonziContextPlugin } from './bonzi-context-plugin'
+import { BonziExternalEmbeddingsService } from './external-embeddings-service'
 import {
-  bonziActionTypeFromElizaActionName,
-  createBonziDesktopActionProposal,
-  createBonziDesktopActionsPlugin
-} from './bonzi-desktop-actions-plugin'
+  applyRuntimeSettings,
+  buildRuntimePlugins,
+  createRuntimeCharacter,
+  createRuntimeConfigSignature
+} from './runtime-bootstrap'
 import {
-  DEFAULT_ELIZA_EMBEDDING_DIMENSION,
-  type ElizaCompatibleEmbeddingDimension
-} from './embedding-dimensions'
-import {
-  BonziExternalEmbeddingsService,
-  type ResolvedEmbeddingRuntimeSettings
-} from './external-embeddings-service'
+  dedupeProposedActions,
+  extractBonziActionsFromActionResults,
+  extractBonziActionsFromContent,
+  extractFailedBonziActionTypes,
+  filterFailedProposedActions,
+  type BonziProposedAction
+} from './runtime-action-proposals'
+import { BonziPluginSettingsStore } from './plugin-settings'
+
+export type { BonziProposedAction } from './runtime-action-proposals'
 
 const BONZI_WORLD_ID = stringToUuid('bonzi-world')
 const BONZI_USER_ID = stringToUuid('bonzi-user')
@@ -60,13 +63,6 @@ interface RuntimeBundle {
 interface BonziRuntimeManagerOptions {
   getShellState: () => ShellState
   dataDir?: string
-}
-
-export interface BonziProposedAction {
-  type: AssistantActionType
-  title?: string
-  description?: string
-  requiresConfirmation?: boolean
 }
 
 export interface BonziRuntimeTurn {
@@ -94,6 +90,7 @@ export class BonziRuntimeManager {
   private readonly dataDir: string
   private readonly getShellState: () => ShellState
   private readonly embeddingsService = new BonziExternalEmbeddingsService()
+  private readonly pluginSettingsStore = new BonziPluginSettingsStore()
 
   constructor(options: BonziRuntimeManagerOptions) {
     this.getShellState = options.getShellState
@@ -113,6 +110,32 @@ export class BonziRuntimeManager {
 
   getRuntimeStatus(): AssistantRuntimeStatus {
     return { ...this.runtimeStatus }
+  }
+
+  getPluginSettings(): ElizaPluginSettings {
+    return this.pluginSettingsStore.getSettings(this.getProviderInfo())
+  }
+
+  getAvailableActionTypes(): AssistantActionType[] {
+    const settings = this.pluginSettingsStore.getRuntimeSettings()
+    return settings.desktopActionsEnabled ? [...ASSISTANT_ACTION_TYPES] : []
+  }
+
+  async updatePluginSettings(
+    request: UpdateElizaPluginSettingsRequest
+  ): Promise<ElizaPluginSettings> {
+    const settings = this.pluginSettingsStore.updateSettings(
+      request,
+      this.getProviderInfo()
+    )
+
+    if (this.initializing) {
+      await this.initializing.catch(() => null)
+    }
+
+    this.configSignature = null
+
+    return settings
   }
 
   subscribe(listener: (event: AssistantEvent) => void): () => void {
@@ -140,6 +163,38 @@ export class BonziRuntimeManager {
   async resetConversation(): Promise<void> {
     const bundle = await this.getOrCreateRuntime()
     await bundle.runtime.deleteAllMemories(bundle.roomId, 'messages')
+  }
+
+  async recordActionObservation(action: {
+    type: AssistantActionType
+    title: string
+    status: string
+    params?: unknown
+  }, resultMessage: string): Promise<void> {
+    const text = normalizeText(resultMessage)
+
+    if (!text) {
+      return
+    }
+
+    const bundle = await this.getOrCreateRuntime()
+    const paramsText = action.params
+      ? `\nParams: ${JSON.stringify(action.params)}`
+      : ''
+
+    await bundle.runtime.createMemory(
+      createMessageMemory({
+        id: crypto.randomUUID() as UUID,
+        entityId: bundle.runtime.agentId,
+        roomId: bundle.roomId,
+        content: {
+          text: `[Bonzi action observation: ${action.type} / ${action.status}]\n${action.title}${paramsText}\n\n${text}`,
+          source: 'bonzi-action-observation',
+          channelType: ChannelType.DM
+        }
+      }),
+      'messages'
+    )
   }
 
   async sendCommand(command: string): Promise<BonziRuntimeTurn> {
@@ -186,10 +241,14 @@ export class BonziRuntimeManager {
     const responseContent = result.responseContent ?? undefined
     const actionResults = bundle.runtime.getActionResults(messageMemory.id as UUID)
     const responseText = normalizeText(responseContent?.text)
+    const failedActionTypes = extractFailedBonziActionTypes(actionResults)
     const actions = dedupeProposedActions([
       ...extractBonziActionsFromActionResults(actionResults),
-      ...callbackActions,
-      ...extractBonziActionsFromContent(responseContent)
+      ...filterFailedProposedActions(callbackActions, failedActionTypes),
+      ...filterFailedProposedActions(
+        extractBonziActionsFromContent(responseContent),
+        failedActionTypes
+      )
     ])
     const reply =
       responseText ||
@@ -237,13 +296,21 @@ export class BonziRuntimeManager {
 
   private async getOrCreateRuntime(): Promise<RuntimeBundle> {
     const config = this.syncConfigState()
-    const signature = this.createConfigSignature(config)
+    const runtimeSettings = this.pluginSettingsStore.getRuntimeSettings()
+    const signature = createRuntimeConfigSignature({ config, runtimeSettings })
 
     this.providerInfo = config.provider
     this.startupWarnings = [...config.startupWarnings]
 
     if (this.bundle && this.configSignature === signature) {
-      await this.applySettings(this.bundle.runtime, config)
+      this.addStartupWarnings(
+        await applyRuntimeSettings({
+          runtime: this.bundle.runtime,
+          config,
+          dataDir: this.dataDir,
+          embeddingsService: this.embeddingsService
+        })
+      )
       return this.bundle
     }
 
@@ -266,15 +333,24 @@ export class BonziRuntimeManager {
 
       try {
         const runtime = new AgentRuntime({
-          character: createBonziCharacter({
-            systemPromptOverride: config.systemPromptOverride
+          character: createRuntimeCharacter({ config, runtimeSettings }),
+          plugins: await buildRuntimePlugins({
+            config,
+            runtimeSettings,
+            getShellState: this.getShellState
           }),
-          plugins: await this.buildPlugins(config),
           actionPlanning: true,
           llmMode: LLMMode.SMALL
         })
 
-        await this.applySettings(runtime, config)
+        this.addStartupWarnings(
+          await applyRuntimeSettings({
+            runtime,
+            config,
+            dataDir: this.dataDir,
+            embeddingsService: this.embeddingsService
+          })
+        )
         await runtime.initialize()
 
         await runtime.ensureConnection({
@@ -339,159 +415,6 @@ export class BonziRuntimeManager {
     }
   }
 
-  private async buildPlugins(
-    config: BonziElizaResolvedConfig
-  ): Promise<Plugin[]> {
-    const plugins: Plugin[] = [
-      localdbPlugin,
-      createBonziContextPlugin({
-        getShellState: this.getShellState
-      }),
-      createBonziDesktopActionsPlugin()
-    ]
-
-    if (config.effectiveProvider === 'openai-compatible') {
-      const openaiPlugin = (await import('@elizaos/plugin-openai')).default
-      return [...plugins, openaiPlugin]
-    }
-
-    return [...plugins, elizaClassicPlugin]
-  }
-
-  private async applySettings(
-    runtime: AgentRuntime,
-    config: BonziElizaResolvedConfig
-  ): Promise<void> {
-    runtime.setSetting('LLM_MODE', 'DEFAULT')
-    runtime.setSetting('CHECK_SHOULD_RESPOND', false)
-    runtime.setSetting('LOCALDB_DATA_DIR', this.dataDir)
-
-    if (config.effectiveProvider === 'openai-compatible' && config.openai) {
-      runtime.setSetting('OPENAI_API_KEY', config.openai.apiKey, true)
-      runtime.setSetting('OPENAI_BASE_URL', config.openai.baseUrl)
-      runtime.setSetting('OPENAI_SMALL_MODEL', config.openai.model)
-      runtime.setSetting('OPENAI_LARGE_MODEL', config.openai.model)
-
-      const embeddingRuntimeSettings =
-        await this.resolveEmbeddingRuntimeSettings(config)
-
-      if (embeddingRuntimeSettings?.model) {
-        runtime.setSetting(
-          'OPENAI_EMBEDDING_MODEL',
-          embeddingRuntimeSettings.model
-        )
-      }
-
-      if (embeddingRuntimeSettings?.baseUrl) {
-        runtime.setSetting(
-          'OPENAI_EMBEDDING_URL',
-          embeddingRuntimeSettings.baseUrl
-        )
-      }
-
-      if (embeddingRuntimeSettings?.apiKey) {
-        runtime.setSetting(
-          'OPENAI_EMBEDDING_API_KEY',
-          embeddingRuntimeSettings.apiKey,
-          true
-        )
-      }
-
-      if (embeddingRuntimeSettings?.dimensions !== undefined) {
-        runtime.setSetting(
-          'OPENAI_EMBEDDING_DIMENSIONS',
-          String(embeddingRuntimeSettings.dimensions)
-        )
-      }
-
-      if (
-        embeddingRuntimeSettings?.warning &&
-        !this.startupWarnings.includes(embeddingRuntimeSettings.warning)
-      ) {
-        this.startupWarnings = [
-          ...this.startupWarnings,
-          embeddingRuntimeSettings.warning
-        ]
-      }
-      return
-    }
-
-    await this.embeddingsService.stop()
-  }
-
-  private async resolveEmbeddingRuntimeSettings(
-    config: BonziElizaResolvedConfig
-  ): Promise<ResolvedEmbeddingRuntimeSettings | null> {
-    if (config.effectiveProvider !== 'openai-compatible' || !config.openai) {
-      await this.embeddingsService.stop()
-      return null
-    }
-
-    const embeddingConfig = config.openai.embedding
-    if (!embeddingConfig) {
-      await this.embeddingsService.stop()
-      return null
-    }
-
-    const dimensions =
-      embeddingConfig.dimensions ?? DEFAULT_ELIZA_EMBEDDING_DIMENSION
-
-    if (embeddingConfig.mode === 'local-service' && embeddingConfig.service) {
-      return this.embeddingsService.start(embeddingConfig.service, dimensions)
-    }
-
-    await this.embeddingsService.stop()
-    return {
-      model: embeddingConfig.model,
-      baseUrl: embeddingConfig.baseUrl,
-      apiKey: embeddingConfig.apiKey,
-      dimensions
-    }
-  }
-
-  private createConfigSignature(config: BonziElizaResolvedConfig): string {
-    return JSON.stringify({
-      effectiveProvider: config.effectiveProvider,
-      e2eMode: config.e2eMode,
-      systemPromptOverride: config.systemPromptOverride ?? '',
-      openai: config.openai
-        ? {
-            baseUrl: config.openai.baseUrl,
-            model: config.openai.model,
-            apiKeyFingerprint: fingerprintSecret(config.openai.apiKey),
-            embedding: config.openai.embedding
-              ? {
-                  mode: config.openai.embedding.mode,
-                  model: config.openai.embedding.model ?? '',
-                  baseUrl: config.openai.embedding.baseUrl ?? '',
-                  apiKeyFingerprint: fingerprintSecret(
-                    config.openai.embedding.apiKey
-                  ),
-                  dimensions:
-                    config.openai.embedding.dimensions ??
-                    DEFAULT_ELIZA_EMBEDDING_DIMENSION,
-                      service: config.openai.embedding.service
-                    ? {
-                        upstreamBaseUrl:
-                          config.openai.embedding.service.upstreamBaseUrl,
-                        upstreamModel:
-                          config.openai.embedding.service.upstreamModel,
-                        upstreamApiKeyFingerprint: fingerprintSecret(
-                          config.openai.embedding.service.upstreamApiKey
-                        ),
-                        dimensionStrategy:
-                          config.openai.embedding.service.dimensionStrategy,
-                        port: config.openai.embedding.service.port,
-                        timeoutMs: config.openai.embedding.service.timeoutMs
-                      }
-                    : null
-                }
-              : null
-          }
-        : null
-    })
-  }
-
   private memoryToAssistantMessage(
     memory: Memory,
     bundle: RuntimeBundle
@@ -516,6 +439,16 @@ export class BonziRuntimeManager {
     }
   }
 
+  private addStartupWarnings(warnings: string[]): void {
+    const additions = warnings.filter(
+      (warning) => !this.startupWarnings.includes(warning)
+    )
+
+    if (additions.length > 0) {
+      this.startupWarnings = [...this.startupWarnings, ...additions]
+    }
+  }
+
   private updateRuntimeStatus(status: AssistantRuntimeStatus): void {
     this.runtimeStatus = status
     this.emit({
@@ -529,93 +462,6 @@ export class BonziRuntimeManager {
       listener(event)
     }
   }
-}
-
-function extractBonziActionsFromContent(
-  content: Content | null | undefined
-): BonziProposedAction[] {
-  const actions = Array.isArray(content?.actions) ? content.actions : []
-
-  return actions.flatMap((actionName) => {
-    const type = bonziActionTypeFromElizaActionName(actionName)
-    return type ? [createBonziDesktopActionProposal(type)] : []
-  })
-}
-
-function extractBonziActionsFromActionResults(
-  results: ActionResult[]
-): BonziProposedAction[] {
-  return results.flatMap((result) => {
-    const proposal = extractBonziActionProposalFromData(result.data)
-
-    if (proposal) {
-      return [proposal]
-    }
-
-    const type = bonziActionTypeFromElizaActionName(result.data?.actionName)
-    return type ? [createBonziDesktopActionProposal(type)] : []
-  })
-}
-
-function extractBonziActionProposalFromData(
-  data: ProviderDataRecord | undefined
-): BonziProposedAction | null {
-  const rawProposal = data?.bonziProposedAction
-
-  if (!isRecord(rawProposal)) {
-    return null
-  }
-
-  const type = rawProposal.type
-
-  if (!isAssistantActionType(type)) {
-    return null
-  }
-
-  const defaults = createBonziDesktopActionProposal(type)
-
-  return {
-    type,
-    title: normalizeText(rawProposal.title) || defaults.title,
-    description: normalizeText(rawProposal.description) || defaults.description,
-    requiresConfirmation:
-      typeof rawProposal.requiresConfirmation === 'boolean'
-        ? rawProposal.requiresConfirmation
-        : defaults.requiresConfirmation
-  }
-}
-
-function dedupeProposedActions(
-  actions: BonziProposedAction[]
-): BonziProposedAction[] {
-  const seen = new Set<AssistantActionType>()
-  const deduped: BonziProposedAction[] = []
-
-  for (const action of actions) {
-    if (seen.has(action.type)) {
-      continue
-    }
-
-    seen.add(action.type)
-    deduped.push(action)
-  }
-
-  return deduped
-}
-
-function normalizeText(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
-}
-
-function isAssistantActionType(value: unknown): value is AssistantActionType {
-  return (
-    typeof value === 'string' &&
-    (ASSISTANT_ACTION_TYPES as readonly string[]).includes(value)
-  )
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }
 
 function normalizeTimestamp(value: unknown): string {
@@ -644,12 +490,4 @@ function normalizeError(error: unknown): string {
   }
 
   return String(error)
-}
-
-function fingerprintSecret(value: string | undefined): string {
-  if (!value) {
-    return 'none'
-  }
-
-  return createHash('sha256').update(value).digest('hex')
 }

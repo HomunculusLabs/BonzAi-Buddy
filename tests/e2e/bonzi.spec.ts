@@ -71,6 +71,62 @@ test('boots and completes an assistant roundtrip through the real Electron app',
   }
 })
 
+test('manages bundled optional plugins from settings catalog', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-plugins-'))
+  const env = {
+    ...process.env,
+    BONZI_E2E_MODE: '1',
+    BONZI_ASSISTANT_PROVIDER: 'eliza-classic',
+    BONZI_DISABLE_GPU: '1',
+    BONZI_OPAQUE_WINDOW: '1',
+    BONZI_DISABLE_VRM: '1',
+    BONZI_USER_DATA_DIR: userDataDir
+  }
+  delete env.ELECTRON_RENDERER_URL
+
+  const app = await electron.launch({
+    args: [join(process.cwd(), 'out/main/index.js')],
+    env
+  })
+
+  try {
+    const window = await app.firstWindow()
+
+    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+    await window.locator('[data-action="settings"]').click()
+
+    const installedContextRow = window.locator(
+      '[data-plugin-id="bonzi-context"][data-plugin-installed="true"]'
+    )
+    const availableContextRow = window.locator(
+      '[data-plugin-id="bonzi-context"][data-plugin-available="true"]'
+    )
+
+    await expect(installedContextRow).toBeVisible()
+    await expect(availableContextRow).toHaveCount(0)
+
+    await installedContextRow.locator('[data-plugin-remove="bonzi-context"]').click()
+    await expect(availableContextRow).toBeVisible()
+    await expect(installedContextRow).toHaveCount(0)
+
+    await availableContextRow.locator('[data-plugin-add="bonzi-context"]').click()
+    await expect(installedContextRow).toBeVisible()
+    await expect(availableContextRow).toHaveCount(0)
+
+    const contextToggle = installedContextRow.locator(
+      '[data-plugin-toggle="bonzi-context"]'
+    )
+    await expect(contextToggle).toBeChecked()
+    await contextToggle.uncheck()
+    await expect(installedContextRow.locator('.plugin-row__status')).toHaveText(
+      'Disabled'
+    )
+  } finally {
+    await app.close()
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
 test('routes live embedding requests through the managed embeddings proxy', async () => {
   const upstream = await startFakeOpenAiUpstream()
   const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-embed-'))

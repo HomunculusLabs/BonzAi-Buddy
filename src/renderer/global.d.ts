@@ -7,6 +7,8 @@ import type {
   AssistantCommandResponse,
   AssistantEvent,
   AssistantMessage,
+  ElizaPluginSettings,
+  UpdateElizaPluginSettingsRequest,
   ShellState
 } from '../shared/contracts'
 
@@ -15,6 +17,12 @@ declare global {
     bonzi: {
       app: {
         getShellState: () => Promise<ShellState>
+      }
+      settings: {
+        getElizaPlugins: () => Promise<ElizaPluginSettings>
+        updateElizaPlugins: (
+          request: UpdateElizaPluginSettingsRequest
+        ) => Promise<ElizaPluginSettings>
       }
       window: {
         getBounds: () => Promise<{

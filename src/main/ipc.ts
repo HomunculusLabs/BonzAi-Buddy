@@ -5,7 +5,8 @@ import type {
   AssistantActionExecutionRequest,
   AssistantCommandRequest,
   AssistantMessage,
-  ShellState
+  ShellState,
+  UpdateElizaPluginSettingsRequest
 } from '../shared/contracts'
 
 interface RegisterIpcHandlersOptions {
@@ -42,9 +43,21 @@ export function registerIpcHandlers(
     return buildShellState(
       assistantService.getProviderInfo(),
       assistantService.getStartupWarnings(),
-      assistantService.getRuntimeStatus()
+      assistantService.getRuntimeStatus(),
+      assistantService.getAvailableActionTypes()
     )
   })
+
+  ipcMain.handle('settings:get-eliza-plugins', () => {
+    return assistantService.getPluginSettings()
+  })
+
+  ipcMain.handle(
+    'settings:update-eliza-plugins',
+    async (_event, request: UpdateElizaPluginSettingsRequest) => {
+      return assistantService.updatePluginSettings(request)
+    }
+  )
 
   ipcMain.on('window:minimize', (event) => {
     BrowserWindow.fromWebContents(event.sender)?.minimize()

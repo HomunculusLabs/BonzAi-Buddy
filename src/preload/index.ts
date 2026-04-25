@@ -6,6 +6,8 @@ import type {
   AssistantCommandResponse,
   AssistantEvent,
   AssistantMessage,
+  ElizaPluginSettings,
+  UpdateElizaPluginSettingsRequest,
   ShellState
 } from '../shared/contracts'
 
@@ -13,6 +15,14 @@ const bonziApi = {
   app: {
     getShellState: (): Promise<ShellState> =>
       ipcRenderer.invoke('app:get-shell-state')
+  },
+  settings: {
+    getElizaPlugins: (): Promise<ElizaPluginSettings> =>
+      ipcRenderer.invoke('settings:get-eliza-plugins'),
+    updateElizaPlugins: (
+      request: UpdateElizaPluginSettingsRequest
+    ): Promise<ElizaPluginSettings> =>
+      ipcRenderer.invoke('settings:update-eliza-plugins', request)
   },
   window: {
     getBounds: (): Promise<{
