@@ -6,11 +6,20 @@ import {
   type AssistantActionType,
   type AssistantCommandRequest,
   type AssistantCommandResponse,
+  type CancelWorkflowRunRequest,
+  type CancelWorkflowRunResponse,
   type AssistantEvent,
   type AssistantMessage,
   type AssistantProviderInfo,
   type AssistantRuntimeStatus,
+  type BonziWorkflowRunSnapshot,
+  type ElizaPluginDiscoveryRequest,
+  type RespondWorkflowApprovalRequest,
+  type RespondWorkflowApprovalResponse,
+  type ElizaPluginInstallRequest,
+  type ElizaPluginOperationResult,
   type ElizaPluginSettings,
+  type ElizaPluginUninstallRequest,
   type UpdateElizaPluginSettingsRequest,
   type ShellState
 } from '../shared/contracts'
@@ -29,13 +38,31 @@ export interface AssistantService {
   getStartupWarnings: () => string[]
   getRuntimeStatus: () => AssistantRuntimeStatus
   getPluginSettings: () => ElizaPluginSettings
+  discoverPlugins: (
+    request?: ElizaPluginDiscoveryRequest
+  ) => Promise<ElizaPluginSettings>
   updatePluginSettings: (
     request: UpdateElizaPluginSettingsRequest
   ) => Promise<ElizaPluginSettings>
+  installPlugin: (
+    request: ElizaPluginInstallRequest
+  ) => Promise<ElizaPluginOperationResult>
+  uninstallPlugin: (
+    request: ElizaPluginUninstallRequest
+  ) => Promise<ElizaPluginOperationResult>
   getAvailableActionTypes: () => AssistantActionType[]
   getHistory: () => Promise<AssistantMessage[]>
   resetConversation: () => Promise<void>
+  reloadRuntime: () => Promise<AssistantRuntimeStatus>
   subscribe: (listener: (event: AssistantEvent) => void) => () => void
+  getWorkflowRuns: () => BonziWorkflowRunSnapshot[]
+  getWorkflowRun: (id: string) => BonziWorkflowRunSnapshot | null
+  respondWorkflowApproval: (
+    request: RespondWorkflowApprovalRequest
+  ) => Promise<RespondWorkflowApprovalResponse>
+  cancelWorkflowRun: (
+    request: CancelWorkflowRunRequest
+  ) => Promise<CancelWorkflowRunResponse>
   sendCommand: (
     request: AssistantCommandRequest
   ) => Promise<AssistantCommandResponse>
@@ -58,14 +85,79 @@ export function createAssistantService(
     getStartupWarnings: () => runtimeManager.getStartupWarnings(),
     getRuntimeStatus: () => runtimeManager.getRuntimeStatus(),
     getPluginSettings: () => runtimeManager.getPluginSettings(),
+    discoverPlugins: (request) => runtimeManager.discoverPlugins(request),
     updatePluginSettings: (request) => runtimeManager.updatePluginSettings(request),
+    installPlugin: (request) => runtimeManager.installPlugin(request),
+    uninstallPlugin: (request) => runtimeManager.uninstallPlugin(request),
     getAvailableActionTypes: () => runtimeManager.getAvailableActionTypes(),
     getHistory: () => runtimeManager.getHistory(),
     async resetConversation(): Promise<void> {
       pendingActions.clear()
       await runtimeManager.resetConversation()
     },
+    async reloadRuntime(): Promise<AssistantRuntimeStatus> {
+      pendingActions.clear()
+      return runtimeManager.reloadRuntime()
+    },
     subscribe: (listener) => runtimeManager.subscribe(listener),
+    getWorkflowRuns: () => runtimeManager.getWorkflowRuns(),
+    getWorkflowRun: (id) => runtimeManager.getWorkflowRun(id),
+    async respondWorkflowApproval(
+      request: RespondWorkflowApprovalRequest
+    ): Promise<RespondWorkflowApprovalResponse> {
+      const normalized = normalizeWorkflowApprovalRequest(request)
+
+      if (normalized.error) {
+        return {
+          ok: false,
+          message: normalized.error
+        }
+      }
+
+      const run = runtimeManager.respondToWorkflowApproval(normalized)
+
+      if (!run) {
+        return {
+          ok: false,
+          message: 'Workflow run or step could not be found.'
+        }
+      }
+
+      return {
+        ok: true,
+        message: normalized.approved
+          ? 'Workflow action approved.'
+          : 'Workflow action declined.',
+        run
+      }
+    },
+    async cancelWorkflowRun(
+      request: CancelWorkflowRunRequest
+    ): Promise<CancelWorkflowRunResponse> {
+      const normalized = normalizeCancelWorkflowRequest(request)
+
+      if (normalized.error) {
+        return {
+          ok: false,
+          message: normalized.error
+        }
+      }
+
+      const run = runtimeManager.cancelWorkflowRun(normalized.runId)
+
+      if (!run) {
+        return {
+          ok: false,
+          message: 'Workflow run could not be found.'
+        }
+      }
+
+      return {
+        ok: true,
+        message: 'Workflow cancellation requested.',
+        run
+      }
+    },
     async sendCommand(
       request: AssistantCommandRequest
     ): Promise<AssistantCommandResponse> {
@@ -96,7 +188,8 @@ export function createAssistantService(
           provider: runtimeManager.getProviderInfo(),
           reply: createAssistantMessage('assistant', runtimeTurn.reply),
           actions,
-          warnings: [...runtimeManager.getStartupWarnings(), ...runtimeTurn.warnings]
+          warnings: [...runtimeManager.getStartupWarnings(), ...runtimeTurn.warnings],
+          workflowRun: runtimeTurn.workflowRun
         }
       } catch (error) {
         return {
@@ -262,6 +355,83 @@ function normalizeActionExecutionRequest(request: unknown): {
   return {
     actionId: request.actionId,
     confirmed: request.confirmed
+  }
+}
+
+function normalizeWorkflowApprovalRequest(request: unknown): {
+  runId: string
+  stepId: string
+  approved: boolean
+  error?: string
+} {
+  if (!isRecord(request)) {
+    return {
+      runId: '',
+      stepId: '',
+      approved: false,
+      error: 'Malformed workflow approval request.'
+    }
+  }
+
+  const runId = typeof request.runId === 'string' ? request.runId.trim() : ''
+  const stepId = typeof request.stepId === 'string' ? request.stepId.trim() : ''
+
+  if (!runId) {
+    return {
+      runId: '',
+      stepId: '',
+      approved: false,
+      error: 'Workflow approval requests must include a runId.'
+    }
+  }
+
+  if (!stepId) {
+    return {
+      runId: '',
+      stepId: '',
+      approved: false,
+      error: 'Workflow approval requests must include a stepId.'
+    }
+  }
+
+  if (typeof request.approved !== 'boolean') {
+    return {
+      runId: '',
+      stepId: '',
+      approved: false,
+      error: 'Workflow approval requests must include a boolean approved flag.'
+    }
+  }
+
+  return {
+    runId,
+    stepId,
+    approved: request.approved
+  }
+}
+
+function normalizeCancelWorkflowRequest(request: unknown): {
+  runId: string
+  error?: string
+} {
+  if (!isRecord(request)) {
+    return {
+      runId: '',
+      error: 'Malformed cancel workflow request.'
+    }
+  }
+
+  const runId = typeof request.runId === 'string' ? request.runId.trim() : ''
+
+  if (!runId) {
+    return {
+      runId: '',
+      error: 'Cancel workflow requests must include a runId.'
+    }
+  }
+
+  return {
+    runId
   }
 }
 

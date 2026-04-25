@@ -1,5 +1,5 @@
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import {
   createServer,
   type IncomingHttpHeaders,
@@ -20,6 +20,12 @@ interface FakeOpenAiUpstream {
   baseUrl: string
   chatRequests: RecordedRequest[]
   embeddingsRequests: RecordedRequest[]
+  close: () => Promise<void>
+}
+
+interface FakePluginRegistry {
+  baseUrl: string
+  requests: number
   close: () => Promise<void>
 }
 
@@ -121,8 +127,241 @@ test('manages bundled optional plugins from settings catalog', async () => {
     await expect(installedContextRow.locator('.plugin-row__status')).toHaveText(
       'Disabled'
     )
+
+    const persisted = JSON.parse(
+      await readFile(join(userDataDir, 'bonzi-settings.json'), 'utf8')
+    ) as {
+      schemaVersion?: number
+      plugins?: Record<string, { installed: boolean; enabled: boolean }>
+    }
+
+    expect(persisted.schemaVersion).toBe(2)
+    expect(persisted.plugins?.['bonzi-context']).toMatchObject({
+      installed: true,
+      enabled: false
+    })
+    expect(persisted.plugins?.['bonzi-desktop-actions']).toMatchObject({
+      installed: true,
+      enabled: true
+    })
   } finally {
     await app.close()
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
+test('migrates legacy curated plugin settings to V2 records', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-plugins-legacy-'))
+  await writeFile(
+    join(userDataDir, 'bonzi-settings.json'),
+    JSON.stringify(
+      {
+        plugins: {
+          'bonzi-context': false
+        },
+        catalog: {
+          installed: {
+            'bonzi-context': true,
+            'bonzi-desktop-actions': false
+          }
+        }
+      },
+      null,
+      2
+    )
+  )
+
+  const env = {
+    ...process.env,
+    BONZI_E2E_MODE: '1',
+    BONZI_ASSISTANT_PROVIDER: 'eliza-classic',
+    BONZI_DISABLE_GPU: '1',
+    BONZI_OPAQUE_WINDOW: '1',
+    BONZI_DISABLE_VRM: '1',
+    BONZI_USER_DATA_DIR: userDataDir
+  }
+  delete env.ELECTRON_RENDERER_URL
+
+  const app = await electron.launch({
+    args: [join(process.cwd(), 'out/main/index.js')],
+    env
+  })
+
+  try {
+    const window = await app.firstWindow()
+
+    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+    await window.locator('[data-action="settings"]').click()
+
+    const installedContextRow = window.locator(
+      '[data-plugin-id="bonzi-context"][data-plugin-installed="true"]'
+    )
+    const availableDesktopActionsRow = window.locator(
+      '[data-plugin-id="bonzi-desktop-actions"][data-plugin-available="true"]'
+    )
+    const installedDesktopActionsRow = window.locator(
+      '[data-plugin-id="bonzi-desktop-actions"][data-plugin-installed="true"]'
+    )
+
+    await expect(installedContextRow).toBeVisible()
+    await expect(
+      installedContextRow.locator('[data-plugin-toggle="bonzi-context"]')
+    ).not.toBeChecked()
+    await expect(availableDesktopActionsRow).toBeVisible()
+    await expect(installedDesktopActionsRow).toHaveCount(0)
+
+    const persisted = JSON.parse(
+      await readFile(join(userDataDir, 'bonzi-settings.json'), 'utf8')
+    ) as {
+      schemaVersion?: number
+      plugins?: Record<string, { installed: boolean; enabled: boolean }>
+    }
+
+    expect(persisted.schemaVersion).toBe(2)
+    expect(persisted.plugins?.['bonzi-context']).toMatchObject({
+      installed: true,
+      enabled: false
+    })
+    expect(persisted.plugins?.['bonzi-desktop-actions']).toMatchObject({
+      installed: false,
+      enabled: false
+    })
+  } finally {
+    await app.close()
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
+test('heals malformed V2 plugin settings records', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-plugins-malformed-'))
+  await writeFile(
+    join(userDataDir, 'bonzi-settings.json'),
+    JSON.stringify(
+      {
+        schemaVersion: 2,
+        plugins: {
+          'bonzi-context': {
+            installed: 'yes'
+          },
+          provider: {
+            installed: false,
+            enabled: false
+          },
+          'bad-plugin': null
+        }
+      },
+      null,
+      2
+    )
+  )
+
+  const env = {
+    ...process.env,
+    BONZI_E2E_MODE: '1',
+    BONZI_ASSISTANT_PROVIDER: 'eliza-classic',
+    BONZI_DISABLE_GPU: '1',
+    BONZI_OPAQUE_WINDOW: '1',
+    BONZI_DISABLE_VRM: '1',
+    BONZI_USER_DATA_DIR: userDataDir
+  }
+  delete env.ELECTRON_RENDERER_URL
+
+  const app = await electron.launch({
+    args: [join(process.cwd(), 'out/main/index.js')],
+    env
+  })
+
+  try {
+    const window = await app.firstWindow()
+
+    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+    await window.locator('[data-action="settings"]').click()
+
+    await expect(
+      window.locator('[data-plugin-id="bonzi-context"][data-plugin-installed="true"]')
+    ).toBeVisible()
+    await expect(
+      window.locator(
+        '[data-plugin-id="bonzi-desktop-actions"][data-plugin-installed="true"]'
+      )
+    ).toBeVisible()
+
+    const persisted = JSON.parse(
+      await readFile(join(userDataDir, 'bonzi-settings.json'), 'utf8')
+    ) as {
+      schemaVersion?: number
+      plugins?: Record<string, unknown>
+    }
+
+    expect(persisted.schemaVersion).toBe(2)
+    expect(persisted.plugins?.provider).toBeUndefined()
+    expect(persisted.plugins?.['bad-plugin']).toBeUndefined()
+    expect(persisted.plugins?.['bonzi-context']).toBeDefined()
+    expect(persisted.plugins?.['bonzi-desktop-actions']).toBeDefined()
+  } finally {
+    await app.close()
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
+test('discovers plugins from registry endpoint via preload bridge', async () => {
+  const registry = await startFakePluginRegistry()
+  const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-plugin-discovery-'))
+  const env = {
+    ...process.env,
+    BONZI_E2E_MODE: '1',
+    BONZI_ASSISTANT_PROVIDER: 'eliza-classic',
+    BONZI_DISABLE_GPU: '1',
+    BONZI_OPAQUE_WINDOW: '1',
+    BONZI_DISABLE_VRM: '1',
+    BONZI_USER_DATA_DIR: userDataDir,
+    BONZI_ELIZA_PLUGIN_REGISTRY_URL: `${registry.baseUrl}/plugins.json`
+  }
+  delete env.ELECTRON_RENDERER_URL
+
+  const app = await electron.launch({
+    args: [join(process.cwd(), 'out/main/index.js')],
+    env
+  })
+
+  try {
+    const window = await app.firstWindow()
+    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+
+    const discovered = await window.evaluate(async () => {
+      return window.bonzi.plugins.discover({ forceRefresh: true })
+    })
+
+    const registryWeather = discovered.availablePlugins.find(
+      (plugin) => plugin.id === 'weather'
+    )
+    expect(registryWeather).toBeDefined()
+    expect(registryWeather?.packageName).toBe('@elizaos/plugin-weather')
+
+    const incompatibleLegacy = discovered.availablePlugins.find(
+      (plugin) => plugin.id === 'legacy-bot'
+    )
+    expect(incompatibleLegacy?.lifecycleStatus).toBe('incompatible')
+    expect(incompatibleLegacy?.warnings ?? []).toContain(
+      'Registry marked this plugin as incompatible.'
+    )
+
+    const cache = JSON.parse(
+      await readFile(
+        join(userDataDir, 'eliza-plugin-registry-cache.v1.json'),
+        'utf8'
+      )
+    ) as {
+      schemaVersion?: number
+      entries?: unknown[]
+    }
+
+    expect(cache.schemaVersion).toBe(1)
+    expect(Array.isArray(cache.entries)).toBe(true)
+    expect(registry.requests).toBeGreaterThan(0)
+  } finally {
+    await app.close()
+    await registry.close()
     await rm(userDataDir, { recursive: true, force: true })
   }
 })
@@ -188,6 +427,60 @@ test('routes live embedding requests through the managed embeddings proxy', asyn
     await rm(userDataDir, { recursive: true, force: true })
   }
 })
+
+async function startFakePluginRegistry(): Promise<FakePluginRegistry> {
+  let requests = 0
+  const server = createServer((request, response) => {
+    if (request.method === 'GET' && request.url === '/plugins.json') {
+      requests += 1
+      writeJson(response, 200, {
+        plugins: [
+          {
+            id: 'weather',
+            name: 'Weather',
+            packageName: '@elizaos/plugin-weather',
+            description: 'Gets weather reports.',
+            version: '1.2.3',
+            repository: 'https://github.com/elizaos/plugin-weather',
+            compatibility: ['bonzi>=0.1.0'],
+            capabilities: ['weather']
+          },
+          {
+            id: 'legacy-bot',
+            description: 'Legacy plugin that should be marked incompatible.',
+            packageName: '@elizaos/plugin-legacy-bot',
+            compatibility: {
+              compatible: false
+            }
+          }
+        ]
+      })
+      return
+    }
+
+    writeJson(response, 404, {
+      error: {
+        message: 'Not found'
+      }
+    })
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+
+  const address = server.address()
+  if (!address || typeof address === 'string') {
+    throw new Error('Failed to bind fake plugin registry server.')
+  }
+
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    get requests() {
+      return requests
+    },
+    close: () => closeServer(server)
+  }
+}
 
 async function startFakeOpenAiUpstream(): Promise<FakeOpenAiUpstream> {
   const chatRequests: RecordedRequest[] = []

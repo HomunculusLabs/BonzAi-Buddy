@@ -5,6 +5,11 @@ import type {
   AssistantActionExecutionRequest,
   AssistantCommandRequest,
   AssistantMessage,
+  CancelWorkflowRunRequest,
+  ElizaPluginDiscoveryRequest,
+  ElizaPluginInstallRequest,
+  ElizaPluginUninstallRequest,
+  RespondWorkflowApprovalRequest,
   ShellState,
   UpdateElizaPluginSettingsRequest
 } from '../shared/contracts'
@@ -53,9 +58,30 @@ export function registerIpcHandlers(
   })
 
   ipcMain.handle(
+    'plugins:discover',
+    async (_event, request?: ElizaPluginDiscoveryRequest) => {
+      return assistantService.discoverPlugins(request)
+    }
+  )
+
+  ipcMain.handle(
     'settings:update-eliza-plugins',
     async (_event, request: UpdateElizaPluginSettingsRequest) => {
       return assistantService.updatePluginSettings(request)
+    }
+  )
+
+  ipcMain.handle(
+    'plugins:install',
+    async (_event, request: ElizaPluginInstallRequest) => {
+      return assistantService.installPlugin(request)
+    }
+  )
+
+  ipcMain.handle(
+    'plugins:uninstall',
+    async (_event, request: ElizaPluginUninstallRequest) => {
+      return assistantService.uninstallPlugin(request)
     }
   )
 
@@ -140,4 +166,34 @@ export function registerIpcHandlers(
   ipcMain.handle('assistant:reset-conversation', async (): Promise<void> => {
     await assistantService.resetConversation()
   })
+
+  ipcMain.handle('assistant:reload-runtime', async () => {
+    return assistantService.reloadRuntime()
+  })
+
+  ipcMain.handle('assistant:get-workflow-runs', () => {
+    return assistantService.getWorkflowRuns()
+  })
+
+  ipcMain.handle('assistant:get-workflow-run', (_event, id: string) => {
+    if (typeof id !== 'string' || !id.trim()) {
+      return null
+    }
+
+    return assistantService.getWorkflowRun(id)
+  })
+
+  ipcMain.handle(
+    'assistant:respond-workflow-approval',
+    async (_event, request: RespondWorkflowApprovalRequest) => {
+      return assistantService.respondWorkflowApproval(request)
+    }
+  )
+
+  ipcMain.handle(
+    'assistant:cancel-workflow',
+    async (_event, request: CancelWorkflowRunRequest) => {
+      return assistantService.cancelWorkflowRun(request)
+    }
+  )
 }

@@ -6,7 +6,17 @@ import type {
   AssistantCommandResponse,
   AssistantEvent,
   AssistantMessage,
+  AssistantRuntimeStatus,
+  CancelWorkflowRunRequest,
+  CancelWorkflowRunResponse,
+  BonziWorkflowRunSnapshot,
+  ElizaPluginDiscoveryRequest,
+  ElizaPluginInstallRequest,
+  RespondWorkflowApprovalRequest,
+  RespondWorkflowApprovalResponse,
+  ElizaPluginOperationResult,
   ElizaPluginSettings,
+  ElizaPluginUninstallRequest,
   UpdateElizaPluginSettingsRequest,
   ShellState
 } from '../shared/contracts'
@@ -23,6 +33,20 @@ const bonziApi = {
       request: UpdateElizaPluginSettingsRequest
     ): Promise<ElizaPluginSettings> =>
       ipcRenderer.invoke('settings:update-eliza-plugins', request)
+  },
+  plugins: {
+    discover: (
+      request?: ElizaPluginDiscoveryRequest
+    ): Promise<ElizaPluginSettings> =>
+      ipcRenderer.invoke('plugins:discover', request),
+    install: (
+      request: ElizaPluginInstallRequest
+    ): Promise<ElizaPluginOperationResult> =>
+      ipcRenderer.invoke('plugins:install', request),
+    uninstall: (
+      request: ElizaPluginUninstallRequest
+    ): Promise<ElizaPluginOperationResult> =>
+      ipcRenderer.invoke('plugins:uninstall', request)
   },
   window: {
     getBounds: (): Promise<{
@@ -55,6 +79,20 @@ const bonziApi = {
       ipcRenderer.invoke('assistant:get-history'),
     resetConversation: (): Promise<void> =>
       ipcRenderer.invoke('assistant:reset-conversation'),
+    reloadRuntime: (): Promise<AssistantRuntimeStatus> =>
+      ipcRenderer.invoke('assistant:reload-runtime'),
+    getWorkflowRuns: (): Promise<BonziWorkflowRunSnapshot[]> =>
+      ipcRenderer.invoke('assistant:get-workflow-runs'),
+    getWorkflowRun: (id: string): Promise<BonziWorkflowRunSnapshot | null> =>
+      ipcRenderer.invoke('assistant:get-workflow-run', id),
+    respondWorkflowApproval: (
+      request: RespondWorkflowApprovalRequest
+    ): Promise<RespondWorkflowApprovalResponse> =>
+      ipcRenderer.invoke('assistant:respond-workflow-approval', request),
+    cancelWorkflowRun: (
+      request: CancelWorkflowRunRequest
+    ): Promise<CancelWorkflowRunResponse> =>
+      ipcRenderer.invoke('assistant:cancel-workflow', request),
     onEvent: (listener: (event: AssistantEvent) => void): (() => void) => {
       const handler = (_event: Electron.IpcRendererEvent, event: AssistantEvent) => {
         listener(event)

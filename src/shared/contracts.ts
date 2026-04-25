@@ -23,24 +23,90 @@ export type ElizaOptionalPluginId = (typeof ELIZA_OPTIONAL_PLUGIN_IDS)[number]
 
 export type ElizaRequiredPluginId = (typeof ELIZA_REQUIRED_PLUGIN_IDS)[number]
 
-export type ElizaPluginId = ElizaRequiredPluginId | ElizaOptionalPluginId
+export type ElizaPluginId = string
+
+export type ElizaPluginSource =
+  | 'required'
+  | 'bonzi-builtin'
+  | 'registry'
+  | 'local-workspace'
+  | 'installed-package'
+  | 'unknown'
+  | 'user-configured'
+  | 'external'
+
+export type ElizaPluginLifecycleStatus =
+  | 'available'
+  | 'installing'
+  | 'installed'
+  | 'enabled'
+  | 'disabled'
+  | 'install_failed'
+  | 'load_failed'
+  | 'incompatible'
+  | 'uninstalling'
+  | 'removed'
+  | 'error'
+  | 'unknown'
+
+export type ElizaPluginExecutionPolicy =
+  | 'trusted_auto'
+  | 'confirm_each_action'
+  | 'disabled'
+  | 'manual'
+
+export interface ElizaPluginInventoryEntry {
+  id: ElizaPluginId
+  installed: boolean
+  enabled: boolean
+  source: ElizaPluginSource
+  lifecycleStatus: ElizaPluginLifecycleStatus
+  executionPolicy: ElizaPluginExecutionPolicy
+  name?: string
+  packageName?: string
+  version?: string
+  description?: string
+  repository?: string
+  capabilities?: string[]
+  compatibility?: string[]
+  warnings?: string[]
+  errors?: string[]
+}
 
 export interface ElizaInstalledPluginEntry {
   id: ElizaPluginId
   name: string
   packageName?: string
+  version?: string
   description: string
   enabled: boolean
   required: boolean
   configurable: boolean
   removable: boolean
+  source?: ElizaPluginSource
+  lifecycleStatus?: ElizaPluginLifecycleStatus
+  executionPolicy?: ElizaPluginExecutionPolicy
+  capabilities?: string[]
+  compatibility?: string[]
+  repository?: string
+  warnings?: string[]
+  errors?: string[]
 }
 
 export interface ElizaAvailablePluginEntry {
-  id: ElizaOptionalPluginId
+  id: ElizaPluginId
   name: string
   packageName?: string
+  version?: string
   description: string
+  source?: ElizaPluginSource
+  lifecycleStatus?: ElizaPluginLifecycleStatus
+  executionPolicy?: ElizaPluginExecutionPolicy
+  capabilities?: string[]
+  compatibility?: string[]
+  repository?: string
+  warnings?: string[]
+  errors?: string[]
 }
 
 export type ElizaPluginSettingsEntry = ElizaInstalledPluginEntry
@@ -48,15 +114,83 @@ export type ElizaPluginSettingsEntry = ElizaInstalledPluginEntry
 export interface ElizaPluginSettings {
   installedPlugins: ElizaInstalledPluginEntry[]
   availablePlugins: ElizaAvailablePluginEntry[]
+  inventory?: ElizaPluginInventoryEntry[]
+  warnings?: string[]
+  errors?: string[]
+  operations?: ElizaPluginOperationSnapshot[]
 }
 
 export type UpdateElizaPluginSettingsOperation =
-  | { type: 'set-enabled'; id: ElizaOptionalPluginId; enabled: boolean }
-  | { type: 'add'; id: ElizaOptionalPluginId }
-  | { type: 'remove'; id: ElizaOptionalPluginId }
+  | { type: 'set-enabled'; id: ElizaPluginId; enabled: boolean }
+  | { type: 'add'; id: ElizaPluginId }
+  | { type: 'remove'; id: ElizaPluginId }
 
 export interface UpdateElizaPluginSettingsRequest {
   operations: UpdateElizaPluginSettingsOperation[]
+}
+
+export interface ElizaPluginDiscoveryRequest {
+  forceRefresh?: boolean
+}
+
+export interface ElizaPluginInstallRequest {
+  id?: ElizaPluginId
+  pluginId?: ElizaPluginId
+  packageName?: string
+  versionRange?: string
+  registryRef?: string
+  confirmed?: boolean
+  confirmationOperationId?: string
+  ignoreScripts?: boolean
+}
+
+export interface ElizaPluginUpdateRequest {
+  id: ElizaPluginId
+  version?: string
+}
+
+export interface ElizaPluginUninstallRequest {
+  id?: ElizaPluginId
+  pluginId?: ElizaPluginId
+  packageName?: string
+  confirmed?: boolean
+}
+
+export type ElizaPluginOperationType =
+  | 'discover'
+  | 'install'
+  | 'update'
+  | 'uninstall'
+
+export type ElizaPluginOperationStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+
+export interface ElizaPluginOperationSnapshot {
+  operationId: string
+  type: ElizaPluginOperationType
+  pluginId?: ElizaPluginId
+  status: ElizaPluginOperationStatus
+  startedAt: string
+  finishedAt?: string
+  warnings?: string[]
+  error?: string
+  stdout?: string
+  stderr?: string
+  workspaceDir?: string
+  command?: string
+  timeoutMs?: number
+}
+
+export interface ElizaPluginOperationResult {
+  ok: boolean
+  confirmationRequired: boolean
+  message: string
+  operation: ElizaPluginOperationSnapshot
+  settings: ElizaPluginSettings
 }
 
 export type AssistantMessageRole = 'user' | 'assistant' | 'system'
@@ -114,6 +248,67 @@ export interface AssistantCommandRequest {
   history?: AssistantMessage[]
 }
 
+export type BonziWorkflowRunStatus =
+  | 'queued'
+  | 'running'
+  | 'awaiting_user'
+  | 'cancel_requested'
+  | 'cancelled'
+  | 'completed'
+  | 'failed'
+  | 'interrupted'
+
+export type BonziWorkflowStepStatus =
+  | 'pending'
+  | 'running'
+  | 'awaiting_user'
+  | 'awaiting_approval'
+  | 'cancel_requested'
+  | 'cancelled'
+  | 'skipped'
+  | 'completed'
+  | 'failed'
+  | 'interrupted'
+
+export interface BonziWorkflowStepSnapshot {
+  id: string
+  title: string
+  status: BonziWorkflowStepStatus
+  startedAt: string
+  updatedAt: string
+  finishedAt?: string
+  detail?: string
+  pluginId?: string
+  actionName?: string
+  approvalPrompt?: string
+  approvalRequestedAt?: string
+  approvalRespondedAt?: string
+  approvalApproved?: boolean
+}
+
+export interface BonziWorkflowCallbackSnapshot {
+  id: string
+  createdAt: string
+  text?: string
+  actionCount: number
+}
+
+export interface BonziWorkflowRunSnapshot {
+  id: string
+  commandMessageId: string
+  roomId: string
+  userCommand: string
+  status: BonziWorkflowRunStatus
+  revision: number
+  startedAt: string
+  updatedAt: string
+  finishedAt?: string
+  steps: BonziWorkflowStepSnapshot[]
+  callbacks: BonziWorkflowCallbackSnapshot[]
+  replyText?: string
+  error?: string
+}
+
 export interface AssistantCommandResponse {
   ok: boolean
   provider: AssistantProviderInfo
@@ -121,6 +316,7 @@ export interface AssistantCommandResponse {
   error?: string
   actions: AssistantAction[]
   warnings: string[]
+  workflowRun?: BonziWorkflowRunSnapshot
 }
 
 export interface AssistantActionExecutionRequest {
@@ -135,11 +331,34 @@ export interface AssistantActionExecutionResponse {
   confirmationRequired: boolean
 }
 
+export interface RespondWorkflowApprovalRequest {
+  runId: string
+  stepId: string
+  approved: boolean
+}
+
+export interface RespondWorkflowApprovalResponse {
+  ok: boolean
+  message: string
+  run?: BonziWorkflowRunSnapshot
+}
+
+export interface CancelWorkflowRunRequest {
+  runId: string
+}
+
+export interface CancelWorkflowRunResponse {
+  ok: boolean
+  message: string
+  run?: BonziWorkflowRunSnapshot
+}
+
 export type AssistantEventEmoteId = 'wave' | 'happy-bounce'
 
 export type AssistantEvent =
   | { type: 'runtime-status'; status: AssistantRuntimeStatus }
   | { type: 'play-emote'; emoteId: AssistantEventEmoteId }
+  | { type: 'workflow-run-updated'; run: BonziWorkflowRunSnapshot }
 
 export type ShellStateStage =
   | 'runtime-starting'

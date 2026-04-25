@@ -13,12 +13,26 @@ import type {
   ResolvedEmbeddingRuntimeSettings
 } from './external-embeddings-service'
 import type { BonziElizaPluginRuntimeSettings } from './plugin-settings'
+import type {
+  BonziRuntimePluginResolutionResult,
+  BonziRuntimePluginSelectionMetadata
+} from './plugin-runtime-resolver'
+
+interface RuntimePluginResolver {
+  resolveRuntimePlugins(): Promise<BonziRuntimePluginResolutionResult>
+}
+
+export interface BuildRuntimePluginsResult {
+  plugins: Plugin[]
+  warnings: string[]
+}
 
 export async function buildRuntimePlugins(options: {
   config: BonziElizaResolvedConfig
   runtimeSettings: BonziElizaPluginRuntimeSettings
   getShellState: () => ShellState
-}): Promise<Plugin[]> {
+  pluginResolver?: RuntimePluginResolver
+}): Promise<BuildRuntimePluginsResult> {
   const plugins: Plugin[] = [localdbPlugin]
 
   if (options.runtimeSettings.contextEnabled) {
@@ -33,12 +47,25 @@ export async function buildRuntimePlugins(options: {
     plugins.push(createBonziDesktopActionsPlugin())
   }
 
-  if (options.config.effectiveProvider === 'openai-compatible') {
-    const openaiPlugin = (await import('@elizaos/plugin-openai')).default
-    return [...plugins, openaiPlugin]
+  const providerPlugin =
+    options.config.effectiveProvider === 'openai-compatible'
+      ? (await import('@elizaos/plugin-openai')).default
+      : elizaClassicPlugin
+  const runtimePlugins: Plugin[] = [...plugins, providerPlugin]
+
+  if (!options.pluginResolver) {
+    return {
+      plugins: runtimePlugins,
+      warnings: []
+    }
   }
 
-  return [...plugins, elizaClassicPlugin]
+  const resolved = await options.pluginResolver.resolveRuntimePlugins()
+
+  return {
+    plugins: [...runtimePlugins, ...resolved.plugins],
+    warnings: resolved.warnings
+  }
 }
 
 export function createRuntimeCharacter(options: {
@@ -114,14 +141,27 @@ export async function applyRuntimeSettings(options: {
 export function createRuntimeConfigSignature(options: {
   config: BonziElizaResolvedConfig
   runtimeSettings: BonziElizaPluginRuntimeSettings
+  runtimePluginSelection?: BonziRuntimePluginSelectionMetadata[]
 }): string {
   const { config, runtimeSettings } = options
+  const runtimePluginSelection = [...(options.runtimePluginSelection ?? [])].sort(
+    (left, right) => left.id.localeCompare(right.id)
+  )
 
   return JSON.stringify({
     effectiveProvider: config.effectiveProvider,
     e2eMode: config.e2eMode,
     systemPromptOverride: config.systemPromptOverride ?? '',
     pluginSettings: runtimeSettings,
+    externalRuntimePlugins: runtimePluginSelection.map((plugin) => ({
+      id: plugin.id,
+      packageName: plugin.packageName ?? '',
+      versionRange: plugin.versionRange ?? '',
+      exportName: plugin.exportName ?? '',
+      executionPolicy: plugin.executionPolicy,
+      lifecycleStatus: plugin.lifecycleStatus,
+      source: plugin.source
+    })),
     openai: config.openai
       ? {
           baseUrl: config.openai.baseUrl,

@@ -18,7 +18,12 @@ import {
   type AssistantMessage,
   type AssistantProviderInfo,
   type AssistantRuntimeStatus,
+  type BonziWorkflowRunSnapshot,
+  type ElizaPluginDiscoveryRequest,
+  type ElizaPluginInstallRequest,
+  type ElizaPluginOperationResult,
   type ElizaPluginSettings,
+  type ElizaPluginUninstallRequest,
   type ShellState,
   type UpdateElizaPluginSettingsRequest
 } from '../../shared/contracts'
@@ -37,6 +42,7 @@ import {
   createRuntimeCharacter,
   createRuntimeConfigSignature
 } from './runtime-bootstrap'
+import { BonziPluginRuntimeResolver } from './plugin-runtime-resolver'
 import {
   dedupeProposedActions,
   extractBonziActionsFromActionResults,
@@ -45,7 +51,10 @@ import {
   filterFailedProposedActions,
   type BonziProposedAction
 } from './runtime-action-proposals'
+import { BonziPluginDiscoveryService } from './plugin-discovery'
+import { BonziPluginInstallationService } from './plugin-installer'
 import { BonziPluginSettingsStore } from './plugin-settings'
+import { BonziWorkflowManager } from './workflow-manager'
 
 export type { BonziProposedAction } from './runtime-action-proposals'
 
@@ -63,6 +72,7 @@ interface RuntimeBundle {
 interface BonziRuntimeManagerOptions {
   getShellState: () => ShellState
   dataDir?: string
+  workflowRunsPath?: string
 }
 
 export interface BonziRuntimeTurn {
@@ -70,6 +80,7 @@ export interface BonziRuntimeTurn {
   actions: BonziProposedAction[]
   warnings: string[]
   emote?: AssistantEventEmoteId
+  workflowRun?: BonziWorkflowRunSnapshot
 }
 
 export class BonziRuntimeManager {
@@ -81,6 +92,7 @@ export class BonziRuntimeManager {
     label: 'Eliza Classic'
   }
   private startupWarnings: string[] = []
+  private runtimeStartupWarnings: string[] = []
   private runtimeStatus: AssistantRuntimeStatus = {
     backend: 'eliza',
     state: 'starting',
@@ -91,10 +103,35 @@ export class BonziRuntimeManager {
   private readonly getShellState: () => ShellState
   private readonly embeddingsService = new BonziExternalEmbeddingsService()
   private readonly pluginSettingsStore = new BonziPluginSettingsStore()
+  private readonly pluginDiscoveryService = new BonziPluginDiscoveryService({
+    settingsStore: this.pluginSettingsStore
+  })
+  private readonly pluginInstallationService = new BonziPluginInstallationService({
+    settingsStore: this.pluginSettingsStore,
+    discoveryService: this.pluginDiscoveryService
+  })
+  private readonly pluginRuntimeResolver: BonziPluginRuntimeResolver
+  private readonly workflowManager: BonziWorkflowManager
+
+  private readonly unsubscribeWorkflowEvents: () => void
 
   constructor(options: BonziRuntimeManagerOptions) {
     this.getShellState = options.getShellState
     this.dataDir = options.dataDir ?? join(app.getPath('userData'), 'eliza-localdb')
+    this.workflowManager = new BonziWorkflowManager({
+      persistencePath: options.workflowRunsPath
+    })
+    this.pluginRuntimeResolver = new BonziPluginRuntimeResolver({
+      settingsStore: this.pluginSettingsStore,
+      userDataDir: app.getPath('userData'),
+      workflowManager: this.workflowManager
+    })
+    this.unsubscribeWorkflowEvents = this.workflowManager.subscribe((run) => {
+      this.emit({
+        type: 'workflow-run-updated',
+        run
+      })
+    })
     this.syncConfigState()
   }
 
@@ -116,9 +153,65 @@ export class BonziRuntimeManager {
     return this.pluginSettingsStore.getSettings(this.getProviderInfo())
   }
 
+  async discoverPlugins(
+    request: ElizaPluginDiscoveryRequest = {}
+  ): Promise<ElizaPluginSettings> {
+    return this.pluginDiscoveryService.discover(this.getProviderInfo(), request)
+  }
+
+  async installPlugin(
+    request: ElizaPluginInstallRequest
+  ): Promise<ElizaPluginOperationResult> {
+    const result = await this.pluginInstallationService.install(
+      this.getProviderInfo(),
+      request
+    )
+
+    if (result.ok) {
+      this.configSignature = null
+    }
+
+    return result
+  }
+
+  async uninstallPlugin(
+    request: ElizaPluginUninstallRequest
+  ): Promise<ElizaPluginOperationResult> {
+    const result = await this.pluginInstallationService.uninstall(
+      this.getProviderInfo(),
+      request
+    )
+
+    if (result.ok) {
+      this.configSignature = null
+    }
+
+    return result
+  }
+
   getAvailableActionTypes(): AssistantActionType[] {
     const settings = this.pluginSettingsStore.getRuntimeSettings()
     return settings.desktopActionsEnabled ? [...ASSISTANT_ACTION_TYPES] : []
+  }
+
+  getWorkflowRuns(): BonziWorkflowRunSnapshot[] {
+    return this.workflowManager.getRuns()
+  }
+
+  getWorkflowRun(id: string): BonziWorkflowRunSnapshot | null {
+    return this.workflowManager.getRun(id)
+  }
+
+  respondToWorkflowApproval(input: {
+    runId: string
+    stepId: string
+    approved: boolean
+  }): BonziWorkflowRunSnapshot | null {
+    return this.workflowManager.respondToApproval(input)
+  }
+
+  cancelWorkflowRun(runId: string): BonziWorkflowRunSnapshot | null {
+    return this.workflowManager.cancelRun(runId)
   }
 
   async updatePluginSettings(
@@ -165,6 +258,27 @@ export class BonziRuntimeManager {
     await bundle.runtime.deleteAllMemories(bundle.roomId, 'messages')
   }
 
+  async reloadRuntime(): Promise<AssistantRuntimeStatus> {
+    if (this.initializing) {
+      await this.initializing.catch(() => null)
+    }
+
+    if (this.bundle) {
+      await this.bundle.runtime.stop()
+      this.bundle = null
+    }
+
+    this.configSignature = null
+
+    try {
+      await this.getOrCreateRuntime()
+    } catch {
+      // runtime status already updated by getOrCreateRuntime failure path
+    }
+
+    return this.getRuntimeStatus()
+  }
+
   async recordActionObservation(action: {
     type: AssistantActionType
     title: string
@@ -205,7 +319,9 @@ export class BonziRuntimeManager {
       return this.buildE2eTurn(command)
     }
 
-    if (!bundle.runtime.messageService) {
+    const messageService = bundle.runtime.messageService
+
+    if (!messageService) {
       throw new Error('Runtime message service not available.')
     }
 
@@ -220,68 +336,97 @@ export class BonziRuntimeManager {
       }
     })
 
-    const callbackTexts: string[] = []
-    const callbackActions: BonziProposedAction[] = []
+    const run = this.workflowManager.createRun({
+      commandMessageId: String(messageMemory.id),
+      roomId: String(bundle.roomId),
+      userCommand: command
+    })
 
-    const result = await bundle.runtime.messageService.handleMessage(
-      bundle.runtime,
-      messageMemory,
-      async (content: Content) => {
-        const text = normalizeText(content.text)
+    try {
+      const callbackTexts: string[] = []
+      const callbackActions: BonziProposedAction[] = []
 
-        if (text) {
-          callbackTexts.push(text)
-        }
+      const result = await this.workflowManager.runWithActiveRun(
+        run.id,
+        async () =>
+          messageService.handleMessage(
+            bundle.runtime,
+            messageMemory,
+            async (content: Content) => {
+              const text = normalizeText(content.text)
+              const extractedActions = extractBonziActionsFromContent(content)
 
-        callbackActions.push(...extractBonziActionsFromContent(content))
-        return []
+              if (text) {
+                callbackTexts.push(text)
+              }
+
+              callbackActions.push(...extractedActions)
+              this.workflowManager.recordCallback(run.id, {
+                text,
+                actionCount: extractedActions.length
+              })
+              return []
+            }
+          )
+      )
+
+      const responseContent = result.responseContent ?? undefined
+      const actionResults = bundle.runtime.getActionResults(messageMemory.id as UUID)
+      const responseText = normalizeText(responseContent?.text)
+      const failedActionTypes = extractFailedBonziActionTypes(actionResults)
+      const actions = dedupeProposedActions([
+        ...extractBonziActionsFromActionResults(actionResults),
+        ...filterFailedProposedActions(callbackActions, failedActionTypes),
+        ...filterFailedProposedActions(
+          extractBonziActionsFromContent(responseContent),
+          failedActionTypes
+        )
+      ])
+      const reply =
+        responseText ||
+        callbackTexts.at(-1) ||
+        (actions.length > 0
+          ? 'I prepared that Bonzi action for you.'
+          : 'The runtime returned an empty response.')
+
+      if (!responseText) {
+        await bundle.runtime.createMemory(
+          createMessageMemory({
+            id: crypto.randomUUID() as UUID,
+            entityId: bundle.runtime.agentId,
+            roomId: bundle.roomId,
+            content: {
+              text: reply,
+              source: 'bonzi-electron-main',
+              channelType: ChannelType.DM
+            }
+          }),
+          'messages'
+        )
       }
-    )
 
-    const responseContent = result.responseContent ?? undefined
-    const actionResults = bundle.runtime.getActionResults(messageMemory.id as UUID)
-    const responseText = normalizeText(responseContent?.text)
-    const failedActionTypes = extractFailedBonziActionTypes(actionResults)
-    const actions = dedupeProposedActions([
-      ...extractBonziActionsFromActionResults(actionResults),
-      ...filterFailedProposedActions(callbackActions, failedActionTypes),
-      ...filterFailedProposedActions(
-        extractBonziActionsFromContent(responseContent),
-        failedActionTypes
-      )
-    ])
-    const reply =
-      responseText ||
-      callbackTexts.at(-1) ||
-      (actions.length > 0
-        ? 'I prepared that Bonzi action for you.'
-        : 'The runtime returned an empty response.')
+      const completedRun = this.workflowManager.completeRun(run.id, {
+        replyText: reply
+      })
 
-    if (!responseText) {
-      await bundle.runtime.createMemory(
-        createMessageMemory({
-          id: crypto.randomUUID() as UUID,
-          entityId: bundle.runtime.agentId,
-          roomId: bundle.roomId,
-          content: {
-            text: reply,
-            source: 'bonzi-electron-main',
-            channelType: ChannelType.DM
-          }
-        }),
-        'messages'
-      )
-    }
-
-    return {
-      reply,
-      actions,
-      warnings: []
+      return {
+        reply,
+        actions,
+        warnings: [],
+        workflowRun: completedRun ?? run
+      }
+    } catch (error) {
+      this.workflowManager.failRun(run.id, {
+        error: normalizeError(error)
+      })
+      throw error
     }
   }
 
   async dispose(): Promise<void> {
     this.listeners.clear()
+    this.unsubscribeWorkflowEvents()
+    this.workflowManager.dispose()
 
     if (this.bundle) {
       await this.bundle.runtime.stop()
@@ -292,15 +437,25 @@ export class BonziRuntimeManager {
     this.bundle = null
     this.initializing = null
     this.configSignature = null
+    this.runtimeStartupWarnings = []
   }
 
   private async getOrCreateRuntime(): Promise<RuntimeBundle> {
     const config = this.syncConfigState()
     const runtimeSettings = this.pluginSettingsStore.getRuntimeSettings()
-    const signature = createRuntimeConfigSignature({ config, runtimeSettings })
+    const runtimePluginSelection =
+      this.pluginRuntimeResolver.getRuntimeSelectionMetadata()
+    const signature = createRuntimeConfigSignature({
+      config,
+      runtimeSettings,
+      runtimePluginSelection
+    })
 
     this.providerInfo = config.provider
-    this.startupWarnings = [...config.startupWarnings]
+    this.startupWarnings = dedupeStrings([
+      ...config.startupWarnings,
+      ...this.runtimeStartupWarnings
+    ])
 
     if (this.bundle && this.configSignature === signature) {
       this.addStartupWarnings(
@@ -332,13 +487,19 @@ export class BonziRuntimeManager {
       }
 
       try {
+        this.runtimeStartupWarnings = []
+        this.startupWarnings = [...config.startupWarnings]
+        const runtimePlugins = await buildRuntimePlugins({
+          config,
+          runtimeSettings,
+          getShellState: this.getShellState,
+          pluginResolver: this.pluginRuntimeResolver
+        })
+        this.addStartupWarnings(runtimePlugins.warnings)
+
         const runtime = new AgentRuntime({
           character: createRuntimeCharacter({ config, runtimeSettings }),
-          plugins: await buildRuntimePlugins({
-            config,
-            runtimeSettings,
-            getShellState: this.getShellState
-          }),
+          plugins: runtimePlugins.plugins,
           actionPlanning: true,
           llmMode: LLMMode.SMALL
         })
@@ -401,7 +562,10 @@ export class BonziRuntimeManager {
   private syncConfigState(): BonziElizaResolvedConfig {
     const config = loadBonziElizaConfig()
     this.providerInfo = config.provider
-    this.startupWarnings = [...config.startupWarnings]
+    this.startupWarnings = dedupeStrings([
+      ...config.startupWarnings,
+      ...this.runtimeStartupWarnings
+    ])
     return config
   }
 
@@ -440,12 +604,11 @@ export class BonziRuntimeManager {
   }
 
   private addStartupWarnings(warnings: string[]): void {
-    const additions = warnings.filter(
-      (warning) => !this.startupWarnings.includes(warning)
-    )
+    const additions = warnings.filter((warning) => !this.runtimeStartupWarnings.includes(warning))
 
     if (additions.length > 0) {
-      this.startupWarnings = [...this.startupWarnings, ...additions]
+      this.runtimeStartupWarnings = [...this.runtimeStartupWarnings, ...additions]
+      this.startupWarnings = dedupeStrings([...this.startupWarnings, ...additions])
     }
   }
 
@@ -490,4 +653,10 @@ function normalizeError(error: unknown): string {
   }
 
   return String(error)
+}
+
+function dedupeStrings(values: string[]): string[] {
+  return Array.from(
+    new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))
+  )
 }

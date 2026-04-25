@@ -247,6 +247,7 @@ export function renderApp(root: HTMLDivElement): void {
   let pendingStageEmote: AssistantEventEmoteId | null = null
   let pendingRuntimeStatus: AssistantRuntimeStatus | null = null
   let pluginSettings: ElizaPluginSettings | null = null
+  const announcedWorkflowApprovalSteps = new Set<string>()
   let isSettingsVisible = false
   let isSavingSettings = false
   let unsubscribeAssistantEvents: (() => void) | null = null
@@ -434,6 +435,23 @@ export function renderApp(root: HTMLDivElement): void {
         }
 
         pendingStageEmote = event.emoteId
+        return
+      case 'workflow-run-updated':
+        for (const step of event.run.steps) {
+          if (step.status !== 'awaiting_approval') {
+            continue
+          }
+
+          const key = `${event.run.id}:${step.id}`
+          if (announcedWorkflowApprovalSteps.has(key)) {
+            continue
+          }
+
+          announcedWorkflowApprovalSteps.add(key)
+          appendSystemMessage(
+            `Workflow approval requested: ${step.approvalPrompt ?? step.title}. Approval UI is not available yet; Bonzi will decline automatically if no response is provided.`
+          )
+        }
         return
     }
   }
