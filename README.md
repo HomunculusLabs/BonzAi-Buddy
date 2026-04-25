@@ -7,14 +7,14 @@ Bonzi now runs an embedded **Eliza runtime** in the Electron main process. The r
 ## Requirements
 
 - Node.js 20+
-- npm 10+
+- Bun 1.2+
 - macOS (primary target for this MVP)
 
 ## Dev setup
 
 1. Install dependencies:
    ```bash
-   npm install
+   bun install
    ```
 2. Copy env template:
    ```bash
@@ -23,16 +23,16 @@ Bonzi now runs an embedded **Eliza runtime** in the Electron main process. The r
 3. Configure runtime provider in `.env` (see below).
 4. Start dev app:
    ```bash
-   npm run dev
+   bun run dev
    ```
 
 ## Scripts
 
-- `npm run dev` — run Electron + Vite in development
-- `npm run typecheck` — TypeScript checks for main/preload/renderer
-- `npm run build` — production build via `electron-vite`
-- `npm run preview` — preview built app
-- `npm run embeddings:check` — probe the configured Bonzi-managed embeddings upstream and verify the returned dimension matches Bonzi/Eliza expectations
+- `bun run dev` — run Electron + Vite in development
+- `bun run typecheck` — TypeScript checks for main/preload/renderer
+- `bun run build` — production build via `electron-vite`
+- `bun run preview` — preview built app
+- `bun run embeddings:check` — probe the configured Bonzi-managed embeddings upstream and verify the returned dimension matches Bonzi/Eliza expectations
 - `./scripts/run-local-embeddings-server.sh` — create/update a local Python venv and start the repo-local OpenAI-compatible embeddings server on port `8999` by default
 
 ## Runtime architecture (Bonzi → Eliza)
@@ -95,7 +95,7 @@ Why this stack:
 - It runs outside LM Studio and exposes a real OpenAI-compatible `POST /v1/embeddings` plus `GET /v1/models`.
 - It works well with Qwen’s Matryoshka embedding models through `sentence-transformers`, so Bonzi can request compatible output sizes directly instead of hoping the upstream honors them.
 - On Apple Silicon it prefers **MPS** automatically when available, with CPU fallback if needed.
-- It keeps Bonzi’s existing local loopback embeddings proxy intact, so `npm run embeddings:check` still validates the upstream before runtime startup.
+- It keeps Bonzi’s existing local loopback embeddings proxy intact, so `bun run embeddings:check` still validates the upstream before runtime startup.
 
 Two practical profiles:
 
@@ -183,7 +183,7 @@ BONZI_LOCAL_EMBEDDINGS_TORCH_DTYPE=auto
 
 ```bash
 curl -s http://127.0.0.1:8999/v1/models
-npm run embeddings:check
+bun run embeddings:check
 ```
 
 The local Python server accepts OpenAI-style embedding requests including `dimensions`, and Bonzi’s proxy will fail early if the configured upstream still returns a mismatched vector length.
@@ -207,7 +207,7 @@ When using the custom-server profile, start the upstream first:
 
 ```bash
 ./scripts/run-local-embeddings-server.sh
-npm run embeddings:check
+bun run embeddings:check
 ```
 
 When using the LM Studio profile, make sure LM Studio is already serving on `http://127.0.0.1:1234/v1` before launching Bonzi.

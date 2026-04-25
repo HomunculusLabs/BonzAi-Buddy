@@ -12,6 +12,8 @@ test-results
 python/__pycache__
 .DS_Store
 npm-debug.log*
+bun-debug.log*
+bun-debug-*.log*
 public/static/animations/*.fbx
 public/static/animations/*.vrma
 !public/static/animations/.gitkeep

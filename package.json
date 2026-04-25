@@ -10,8 +10,8 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "embeddings:check": "tsx src/main/eliza/check-external-embeddings.ts",
-    "test:e2e": "npm run build && playwright test"
+    "embeddings:check": "bun src/main/eliza/check-external-embeddings.ts",
+    "test:e2e": "bun run build && playwright test"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.0",
@@ -19,7 +19,6 @@
     "@types/three": "^0.180.0",
     "electron": "^41.3.0",
     "electron-vite": "^5.0.0",
-    "tsx": "^4.21.0",
     "typescript": "^6.0.3",
     "vite": "^7.3.2"
   },
