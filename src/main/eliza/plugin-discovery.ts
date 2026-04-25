@@ -12,6 +12,7 @@ import type {
   ElizaPluginSettings,
   ElizaPluginSource
 } from '../../shared/contracts'
+import { dedupeStrings, isRecord, normalizeError } from '../../shared/value-utils'
 import {
   BonziPluginSettingsStore,
   type BonziPersistedPluginRecordSnapshot
@@ -825,14 +826,6 @@ function fallbackString(primary: string, fallback: string): string {
   return primary.trim().length > 0 ? primary : fallback
 }
 
-function dedupeStrings(values: string[]): string[] {
-  const normalized = values
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0)
-
-  return Array.from(new Set(normalized))
-}
-
 function isFreshCache(fetchedAt: string): boolean {
   const timestamp = Date.parse(fetchedAt)
   return Number.isFinite(timestamp) && Date.now() - timestamp < REGISTRY_CACHE_TTL_MS
@@ -851,14 +844,3 @@ function isRegistryCacheFile(value: unknown): value is RegistryCacheFile {
   )
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function normalizeError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  return String(error)
-}

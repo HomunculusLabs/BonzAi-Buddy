@@ -1,30 +1,33 @@
 import { app } from 'electron'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import type {
   BonziWorkflowCallbackSnapshot,
   BonziWorkflowRunSnapshot,
-  BonziWorkflowRunStatus,
   BonziWorkflowStepSnapshot,
   BonziWorkflowStepStatus
 } from '../../shared/contracts'
+import { BonziWorkflowRunPersistence } from './workflow-persistence'
+import {
+  WORKFLOW_APPROVAL_TIMEOUT_MS,
+  WORKFLOW_CALLBACK_LIMIT,
+  WORKFLOW_COMMAND_LIMIT,
+  WORKFLOW_RUN_LIMIT,
+  WORKFLOW_RUN_MAX_AGE_MS,
+  WORKFLOW_STEP_TITLE_LIMIT,
+  WORKFLOW_TEXT_LIMIT,
+  clampOptionalText,
+  clampText,
+  cloneRunSnapshot,
+  isTerminalRunStatus,
+  isTerminalStepStatus,
+  limitCallbacks,
+  limitSteps,
+  normalizeActionCount,
+  pendingApprovalKey
+} from './workflow-snapshot-utils'
 
 const WORKFLOW_RUNS_FILE_NAME = 'bonzi-workflow-runs.json'
-const WORKFLOW_RUNS_SCHEMA_VERSION = 1
-const WORKFLOW_RUN_LIMIT = 100
-const WORKFLOW_RUN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
-const WORKFLOW_CALLBACK_LIMIT = 40
-const WORKFLOW_STEP_LIMIT = 200
-const WORKFLOW_TEXT_LIMIT = 2_000
-const WORKFLOW_COMMAND_LIMIT = 2_000
-const WORKFLOW_STEP_TITLE_LIMIT = 200
-const WORKFLOW_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000
-
-interface PersistedWorkflowRunsFile {
-  schemaVersion: number
-  runs: BonziWorkflowRunSnapshot[]
-}
 
 export interface BonziWorkflowManagerOptions {
   persistencePath?: string
@@ -54,7 +57,7 @@ interface UpdateWorkflowStepInput {
 }
 
 export class BonziWorkflowManager {
-  private readonly persistencePath: string
+  private readonly persistence: BonziWorkflowRunPersistence
   private readonly now: () => Date
   private readonly listeners = new Set<(run: BonziWorkflowRunSnapshot) => void>()
   private readonly runsById = new Map<string, BonziWorkflowRunSnapshot>()
@@ -64,11 +67,12 @@ export class BonziWorkflowManager {
   private runOrder: string[] = []
 
   constructor(options: BonziWorkflowManagerOptions = {}) {
-    this.persistencePath =
+    const persistencePath =
       options.persistencePath ?? join(app.getPath('userData'), WORKFLOW_RUNS_FILE_NAME)
+    this.persistence = new BonziWorkflowRunPersistence({ persistencePath })
     this.now = options.now ?? (() => new Date())
 
-    const loadedRuns = this.loadPersistedRuns()
+    const loadedRuns = this.persistence.load()
 
     for (const run of loadedRuns) {
       this.runsById.set(run.id, run)
@@ -808,323 +812,10 @@ export class BonziWorkflowManager {
     }
   }
 
-  private loadPersistedRuns(): BonziWorkflowRunSnapshot[] {
-    if (!existsSync(this.persistencePath)) {
-      return []
-    }
-
-    try {
-      const parsed = JSON.parse(readFileSync(this.persistencePath, 'utf8'))
-
-      if (!isRecord(parsed) || !Array.isArray(parsed.runs)) {
-        return []
-      }
-
-      const schemaVersion = Number(parsed.schemaVersion)
-      if (!Number.isFinite(schemaVersion) || schemaVersion < 1) {
-        return []
-      }
-
-      const runs = parsed.runs
-        .map((entry) => normalizePersistedRun(entry))
-        .filter((run): run is BonziWorkflowRunSnapshot => Boolean(run))
-
-      return runs
-    } catch (error) {
-      console.error('Failed to load workflow runs; starting fresh.', error)
-      return []
-    }
-  }
-
   private persistRunsSafe(): void {
-    try {
-      const payload: PersistedWorkflowRunsFile = {
-        schemaVersion: WORKFLOW_RUNS_SCHEMA_VERSION,
-        runs: this.runOrder
-          .map((runId) => this.runsById.get(runId))
-          .filter((run): run is BonziWorkflowRunSnapshot => Boolean(run))
-      }
-
-      mkdirSync(dirname(this.persistencePath), { recursive: true })
-      writeFileSync(this.persistencePath, JSON.stringify(payload, null, 2))
-    } catch (error) {
-      console.error('Failed to persist workflow runs.', error)
-    }
+    this.persistence.save({
+      runOrder: this.runOrder,
+      runsById: this.runsById
+    })
   }
-}
-
-function normalizePersistedRun(value: unknown): BonziWorkflowRunSnapshot | null {
-  if (!isRecord(value)) {
-    return null
-  }
-
-  if (typeof value.id !== 'string' || !value.id.trim()) {
-    return null
-  }
-
-  const status = normalizeRunStatus(value.status)
-  if (!status) {
-    return null
-  }
-
-  const startedAt = normalizeIso(value.startedAt) ?? new Date().toISOString()
-  const updatedAt = normalizeIso(value.updatedAt) ?? startedAt
-  const finishedAt = normalizeIso(value.finishedAt)
-  const revision = normalizePositiveInteger(value.revision) ?? 1
-
-  return {
-    id: value.id,
-    commandMessageId: clampText(stringOrFallback(value.commandMessageId, value.id), 256),
-    roomId: clampText(stringOrFallback(value.roomId, 'unknown-room'), 256),
-    userCommand: clampText(stringOrFallback(value.userCommand, ''), WORKFLOW_COMMAND_LIMIT),
-    status,
-    revision,
-    startedAt,
-    updatedAt,
-    ...(finishedAt ? { finishedAt } : {}),
-    steps: normalizeSteps(value.steps),
-    callbacks: normalizeCallbacks(value.callbacks),
-    replyText: clampOptionalText(value.replyText, WORKFLOW_TEXT_LIMIT),
-    error: clampOptionalText(value.error, WORKFLOW_TEXT_LIMIT)
-  }
-}
-
-function normalizeSteps(value: unknown): BonziWorkflowStepSnapshot[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  const normalized = value
-    .map((entry) => normalizeStep(entry))
-    .filter((entry): entry is BonziWorkflowStepSnapshot => Boolean(entry))
-
-  return limitSteps(normalized)
-}
-
-function normalizeStep(value: unknown): BonziWorkflowStepSnapshot | null {
-  if (!isRecord(value)) {
-    return null
-  }
-
-  const status = normalizeStepStatus(value.status)
-
-  if (!status) {
-    return null
-  }
-
-  const id = typeof value.id === 'string' && value.id.trim() ? value.id : crypto.randomUUID()
-  const startedAt = normalizeIso(value.startedAt) ?? new Date().toISOString()
-  const updatedAt = normalizeIso(value.updatedAt) ?? startedAt
-  const finishedAt = normalizeIso(value.finishedAt)
-  const title = clampText(value.title, WORKFLOW_STEP_TITLE_LIMIT)
-
-  if (!title) {
-    return null
-  }
-
-  return {
-    id,
-    title,
-    status,
-    startedAt,
-    updatedAt,
-    ...(finishedAt ? { finishedAt } : {}),
-    detail: clampOptionalText(value.detail, WORKFLOW_TEXT_LIMIT),
-    pluginId: clampOptionalText(value.pluginId, 256),
-    actionName: clampOptionalText(value.actionName, 256),
-    approvalPrompt: clampOptionalText(value.approvalPrompt, WORKFLOW_TEXT_LIMIT),
-    approvalRequestedAt: normalizeIso(value.approvalRequestedAt),
-    approvalRespondedAt: normalizeIso(value.approvalRespondedAt),
-    approvalApproved:
-      typeof value.approvalApproved === 'boolean'
-        ? value.approvalApproved
-        : undefined
-  }
-}
-
-function normalizeCallbacks(value: unknown): BonziWorkflowCallbackSnapshot[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  const normalized = value
-    .map((entry) => normalizeCallback(entry))
-    .filter((entry): entry is BonziWorkflowCallbackSnapshot => Boolean(entry))
-
-  return limitCallbacks(normalized)
-}
-
-function normalizeCallback(value: unknown): BonziWorkflowCallbackSnapshot | null {
-  if (!isRecord(value)) {
-    return null
-  }
-
-  const id = typeof value.id === 'string' && value.id.trim() ? value.id : crypto.randomUUID()
-  const createdAt = normalizeIso(value.createdAt) ?? new Date().toISOString()
-  const text = clampOptionalText(value.text, WORKFLOW_TEXT_LIMIT)
-  const actionCount = normalizeActionCount(value.actionCount)
-
-  if (!text && actionCount === 0) {
-    return null
-  }
-
-  return {
-    id,
-    createdAt,
-    ...(text ? { text } : {}),
-    actionCount
-  }
-}
-
-function limitSteps(steps: BonziWorkflowStepSnapshot[]): BonziWorkflowStepSnapshot[] {
-  const normalized = steps.map((step) => ({
-    ...step,
-    detail: clampOptionalText(step.detail, WORKFLOW_TEXT_LIMIT),
-    title: clampText(step.title, WORKFLOW_STEP_TITLE_LIMIT)
-  }))
-
-  if (normalized.length <= WORKFLOW_STEP_LIMIT) {
-    return normalized
-  }
-
-  return normalized.slice(normalized.length - WORKFLOW_STEP_LIMIT)
-}
-
-function limitCallbacks(
-  callbacks: BonziWorkflowCallbackSnapshot[]
-): BonziWorkflowCallbackSnapshot[] {
-  if (callbacks.length <= WORKFLOW_CALLBACK_LIMIT) {
-    return callbacks
-  }
-
-  return callbacks.slice(callbacks.length - WORKFLOW_CALLBACK_LIMIT)
-}
-
-function normalizeRunStatus(value: unknown): BonziWorkflowRunStatus | null {
-  if (
-    value === 'queued' ||
-    value === 'running' ||
-    value === 'awaiting_user' ||
-    value === 'cancel_requested' ||
-    value === 'cancelled' ||
-    value === 'completed' ||
-    value === 'failed' ||
-    value === 'interrupted'
-  ) {
-    return value
-  }
-
-  return null
-}
-
-function normalizeStepStatus(value: unknown): BonziWorkflowStepStatus | null {
-  if (
-    value === 'pending' ||
-    value === 'running' ||
-    value === 'awaiting_user' ||
-    value === 'awaiting_approval' ||
-    value === 'cancel_requested' ||
-    value === 'cancelled' ||
-    value === 'skipped' ||
-    value === 'completed' ||
-    value === 'failed' ||
-    value === 'interrupted'
-  ) {
-    return value
-  }
-
-  return null
-}
-
-function normalizeIso(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined
-  }
-
-  const parsed = new Date(value)
-
-  if (Number.isNaN(parsed.getTime())) {
-    return undefined
-  }
-
-  return parsed.toISOString()
-}
-
-function normalizePositiveInteger(value: unknown): number | undefined {
-  const numeric = typeof value === 'number' ? value : Number(value)
-
-  if (!Number.isFinite(numeric) || numeric < 1) {
-    return undefined
-  }
-
-  return Math.floor(numeric)
-}
-
-function normalizeActionCount(value: unknown): number {
-  const numeric = typeof value === 'number' ? value : Number(value)
-
-  if (!Number.isFinite(numeric) || numeric < 0) {
-    return 0
-  }
-
-  return Math.min(500, Math.floor(numeric))
-}
-
-function clampText(value: unknown, maxLength: number): string {
-  const text = typeof value === 'string' ? value.trim() : ''
-
-  if (text.length <= maxLength) {
-    return text
-  }
-
-  return `${text.slice(0, maxLength - 1)}…`
-}
-
-function clampOptionalText(value: unknown, maxLength: number): string | undefined {
-  const text = clampText(value, maxLength)
-  return text.length > 0 ? text : undefined
-}
-
-function stringOrFallback(value: unknown, fallback: string): string {
-  if (typeof value !== 'string') {
-    return fallback
-  }
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : fallback
-}
-
-function isTerminalRunStatus(status: BonziWorkflowRunStatus): boolean {
-  return (
-    status === 'cancelled' ||
-    status === 'completed' ||
-    status === 'failed' ||
-    status === 'interrupted'
-  )
-}
-
-function isTerminalStepStatus(status: BonziWorkflowStepStatus): boolean {
-  return (
-    status === 'cancelled' ||
-    status === 'skipped' ||
-    status === 'completed' ||
-    status === 'failed' ||
-    status === 'interrupted'
-  )
-}
-
-function pendingApprovalKey(runId: string, stepId: string): string {
-  return `${runId}:${stepId}`
-}
-
-function cloneRunSnapshot(run: BonziWorkflowRunSnapshot): BonziWorkflowRunSnapshot {
-  return {
-    ...run,
-    steps: run.steps.map((step) => ({ ...step })),
-    callbacks: run.callbacks.map((callback) => ({ ...callback }))
-  }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
 }

@@ -4,15 +4,7 @@ import {
   type ElizaOptionalPluginId,
   type ElizaPluginSettings
 } from '../shared/contracts'
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
-}
+import { escapeHtml } from './html-utils'
 
 function normalizeStatus(plugin: {
   required?: boolean

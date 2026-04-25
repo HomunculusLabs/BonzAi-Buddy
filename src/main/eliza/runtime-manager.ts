@@ -29,6 +29,7 @@ import {
   type UpdateElizaPluginSettingsRequest,
   type UpdateRuntimeApprovalSettingsRequest
 } from '../../shared/contracts'
+import { dedupeStrings, normalizeError } from '../../shared/value-utils'
 import {
   normalizeText
 } from '../assistant-action-param-utils'
@@ -690,16 +691,3 @@ function normalizeTimestamp(value: unknown): string {
   return new Date().toISOString()
 }
 
-function normalizeError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  return String(error)
-}
-
-function dedupeStrings(values: string[]): string[] {
-  return Array.from(
-    new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))
-  )
-}

@@ -13,6 +13,7 @@ import {
   type ElizaPluginSettings,
   type ElizaPluginUninstallRequest
 } from '../../shared/contracts'
+import { isRecord, normalizeError, normalizeOptionalString } from '../../shared/value-utils'
 import { BonziPluginDiscoveryService } from './plugin-discovery'
 import { BonziPluginSettingsStore } from './plugin-settings'
 
@@ -656,26 +657,6 @@ function normalizePluginId(value: unknown): string | undefined {
   return normalized.length > 0 ? normalized : undefined
 }
 
-function normalizeOptionalString(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined
-  }
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : undefined
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function normalizeError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  return String(error)
-}
 
 async function runCommandWithBoundedOutput(options: {
   command: string

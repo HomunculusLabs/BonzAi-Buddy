@@ -25,6 +25,7 @@ import {
   type UpdateRuntimeApprovalSettingsRequest,
   type ShellState
 } from '../shared/contracts'
+import { isRecord, normalizeError } from '../shared/value-utils'
 import { BonziRuntimeManager } from './eliza/runtime-manager'
 import { truncate } from './assistant-action-param-utils'
 import { executeAssistantAction } from './assistant-action-executor'
@@ -493,14 +494,3 @@ async function executePendingAction(
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function normalizeError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  return String(error)
-}

@@ -5,6 +5,7 @@ import type {
   BonziWorkflowRunSnapshot,
   BonziWorkflowStepSnapshot
 } from '../shared/contracts'
+import { escapeHtml } from './html-utils'
 
 const EXAMPLE_COMMANDS = [
   'show shell state',
@@ -25,15 +26,6 @@ export interface ConversationEntry {
   actions: AssistantAction[]
   warnings: string[]
   workflowRun?: BonziWorkflowRunSnapshot
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
 }
 
 function formatTimestamp(value: string): string {

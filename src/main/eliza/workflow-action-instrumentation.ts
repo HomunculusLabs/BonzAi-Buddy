@@ -12,6 +12,7 @@ import {
   type AssistantActionType,
   type ElizaPluginExecutionPolicy
 } from '../../shared/contracts'
+import { isRecord, normalizeError } from '../../shared/value-utils'
 import {
   normalizeText,
   sanitizeAssistantActionParams
@@ -452,14 +453,6 @@ function safeRecordCallback(
   }
 }
 
-function normalizeError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  return String(error)
-}
-
 function isAssistantActionType(value: unknown): value is AssistantActionType {
   return (
     typeof value === 'string' &&
@@ -467,6 +460,3 @@ function isAssistantActionType(value: unknown): value is AssistantActionType {
   )
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}

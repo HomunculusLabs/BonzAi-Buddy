@@ -2,6 +2,7 @@ import {
   isElizaCompatibleEmbeddingDimension,
   type ElizaCompatibleEmbeddingDimension
 } from './embedding-dimensions'
+import { isRecord } from '../../shared/value-utils'
 
 export type BonziEmbeddingsUpstreamDimensionStrategy =
   | 'strict'
@@ -268,6 +269,3 @@ function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/u, '')
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}

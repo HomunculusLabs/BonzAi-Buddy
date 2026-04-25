@@ -9,6 +9,7 @@ import type {
   ElizaPluginLifecycleStatus,
   ElizaPluginSource
 } from '../../shared/contracts'
+import { isRecord, normalizeError, normalizeOptionalString } from '../../shared/value-utils'
 import { resolvePluginWorkspaceDir } from './plugin-installer'
 import {
   BonziPluginSettingsStore,
@@ -270,23 +271,3 @@ function extractCapabilities(plugin: Plugin): string[] | undefined {
   return capabilities.length > 0 ? capabilities : undefined
 }
 
-function normalizeOptionalString(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined
-  }
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : undefined
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function normalizeError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-
-  return String(error)
-}

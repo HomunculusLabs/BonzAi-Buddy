@@ -9,6 +9,7 @@ import {
   DEFAULT_ELIZA_EMBEDDING_DIMENSION,
   type ElizaCompatibleEmbeddingDimension
 } from './embedding-dimensions'
+import { isRecord } from '../../shared/value-utils'
 import {
   listenOnLoopback,
   readJsonRequestBody,
@@ -281,6 +282,3 @@ function fingerprintSecret(value: string | undefined): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
