@@ -5,6 +5,7 @@ import {
   type AssistantRuntimeStatus,
   type BonziWorkflowRunSnapshot,
   type ElizaPluginSettings,
+  type RuntimeApprovalSettings,
   type ShellState,
   type UpdateElizaPluginSettingsRequest
 } from '../shared/contracts'
@@ -79,10 +80,11 @@ export function renderApp(root: HTMLDivElement): void {
         <header class="settings-panel__header">
           <div>
             <h2>Settings</h2>
-            <p>Manage elizaOS plugins loaded by Bonzi.</p>
+            <p>Manage autonomy and elizaOS plugins loaded by Bonzi.</p>
           </div>
           <button class="window-button" data-action="settings-close" type="button" aria-label="Close settings">×</button>
         </header>
+        <div class="settings-panel__section" data-approval-settings></div>
         <div class="settings-panel__plugins" data-plugin-settings></div>
         <p class="settings-panel__status" data-settings-status aria-live="polite"></p>
         <button
@@ -171,6 +173,9 @@ export function renderApp(root: HTMLDivElement): void {
     '[data-role="assistant-send"]'
   )
   const settingsPanelEl = root.querySelector<HTMLElement>('[data-settings-panel]')
+  const approvalSettingsEl = root.querySelector<HTMLElement>(
+    '[data-approval-settings]'
+  )
   const pluginSettingsEl = root.querySelector<HTMLElement>('[data-plugin-settings]')
   const settingsStatusEl = root.querySelector<HTMLElement>('[data-settings-status]')
   const applyRuntimeChangesButton = root.querySelector<HTMLButtonElement>(
@@ -197,6 +202,7 @@ export function renderApp(root: HTMLDivElement): void {
     !chatInputEl ||
     !assistantSendButton ||
     !settingsPanelEl ||
+    !approvalSettingsEl ||
     !pluginSettingsEl ||
     !settingsStatusEl ||
     !applyRuntimeChangesButton
@@ -222,7 +228,8 @@ export function renderApp(root: HTMLDivElement): void {
       .join(' ')
 
     applyRuntimeChangesButton.hidden = !isRuntimeReloadPending
-    applyRuntimeChangesButton.disabled = isSavingSettings || isApplyingRuntimeChanges
+    applyRuntimeChangesButton.disabled =
+      isSavingSettings || isSavingApprovalSettings || isApplyingRuntimeChanges
   }
 
   const setSettingsStatus = (message: string): void => {
@@ -240,6 +247,41 @@ export function renderApp(root: HTMLDivElement): void {
       isSaving: isSavingSettings
     })
     syncSettingsStatusUi()
+  }
+
+  const rerenderApprovalSettings = (): void => {
+    const approvalsEnabled = approvalSettings?.approvalsEnabled !== false
+    approvalSettingsEl.innerHTML = `
+      <div class="settings-panel__section-header">
+        <h3 class="settings-panel__section-title">Action approvals</h3>
+        <p class="settings-panel__section-copy">
+          ${approvalsEnabled
+            ? 'Sensitive action cards, workflow steps, and plugin operations pause for approval.'
+            : 'Actions, workflows, and plugin operations that would normally ask approval continue automatically.'}
+        </p>
+      </div>
+      <label class="plugin-row approval-settings-row">
+        <span class="plugin-row__copy">
+          <span class="plugin-row__title">
+            Bonzi approvals
+            <span class="plugin-row__status">${approvalsEnabled ? 'Enabled' : 'Autonomous'}</span>
+          </span>
+          <span class="plugin-row__description">
+            Turn this off for more autonomy. Disabling requires explicit confirmation once.
+          </span>
+        </span>
+        <span class="plugin-row__action-group">
+          <span>${approvalsEnabled ? 'On' : 'Off'}</span>
+          <input
+            class="plugin-row__toggle"
+            type="checkbox"
+            data-approval-toggle
+            ${approvalsEnabled ? 'checked' : ''}
+            ${isSavingApprovalSettings ? 'disabled' : ''}
+          />
+        </span>
+      </label>
+    `
   }
 
   const discoverPluginSettings = async (): Promise<ElizaPluginSettings> => {
@@ -293,12 +335,27 @@ export function renderApp(root: HTMLDivElement): void {
     }
   }
 
+  const hydrateApprovalSettings = async (): Promise<void> => {
+    if (!window.bonzi) {
+      return
+    }
+
+    try {
+      approvalSettings = await window.bonzi.settings.getRuntimeApprovalSettings()
+      rerenderApprovalSettings()
+      rerenderConversation()
+    } catch (error) {
+      setSettingsStatus(`Failed to load approval settings: ${String(error)}`)
+    }
+  }
+
   const setSettingsVisible = (visible: boolean): void => {
     isSettingsVisible = visible
     settingsPanelEl.hidden = !visible
     shellEl.classList.toggle('shell--settings-open', visible)
 
     if (visible) {
+      void hydrateApprovalSettings()
       void hydratePluginSettings()
     }
   }
@@ -313,9 +370,11 @@ export function renderApp(root: HTMLDivElement): void {
   let pendingStageEmote: AssistantEventEmoteId | null = null
   let pendingRuntimeStatus: AssistantRuntimeStatus | null = null
   let pluginSettings: ElizaPluginSettings | null = null
+  let approvalSettings: RuntimeApprovalSettings | null = null
   const pendingPluginInstallConfirmations = new Map<string, string>()
   let isSettingsVisible = false
   let isSavingSettings = false
+  let isSavingApprovalSettings = false
   let isApplyingRuntimeChanges = false
   let isRuntimeReloadPending = false
   let settingsStatusMessage = ''
@@ -340,9 +399,11 @@ export function renderApp(root: HTMLDivElement): void {
 
   renderConversation(chatLogEl, conversation, pendingConfirmations, {
     isAwaitingAssistant,
-    isUiVisible
+    isUiVisible,
+    approvalsEnabled: true
   })
   rerenderPluginSettings()
+  rerenderApprovalSettings()
 
   const setUiVisible = (visible: boolean): void => {
     isUiVisible = visible
@@ -359,7 +420,8 @@ export function renderApp(root: HTMLDivElement): void {
   const rerenderConversation = (): void => {
     renderConversation(chatLogEl, conversation, pendingConfirmations, {
       isAwaitingAssistant,
-      isUiVisible
+      isUiVisible,
+      approvalsEnabled: approvalSettings?.approvalsEnabled !== false
     })
     syncBubbleWindowLayout()
   }
@@ -423,9 +485,11 @@ export function renderApp(root: HTMLDivElement): void {
           }
 
     shellState = nextState
+    approvalSettings = nextState.assistant.approvals
     shellStateEl.textContent = shellStateMarkup(nextState)
     vrmPathEl.textContent = nextState.vrmAssetPath
     setProviderLabel(nextState.assistant.provider.label)
+    rerenderApprovalSettings()
   }
 
   const submitPluginSettingsUpdate = async (
@@ -603,6 +667,36 @@ export function renderApp(root: HTMLDivElement): void {
     rerenderConversation()
   }
 
+  const autoRunPendingActionCards = async (): Promise<void> => {
+    if (!window.bonzi) {
+      return
+    }
+
+    const pendingActions = conversation.flatMap((entry) =>
+      entry.actions.filter(
+        (action) =>
+          action.status === 'pending' || action.status === 'needs_confirmation'
+      )
+    )
+
+    for (const action of pendingActions) {
+      try {
+        const response = await window.bonzi.assistant.executeAction({
+          actionId: action.id,
+          confirmed: true
+        })
+
+        if (response.action) {
+          applyActionUpdate(conversation, response.action)
+        }
+      } catch (error) {
+        appendSystemMessage(`Action failed: ${String(error)}`)
+      }
+    }
+
+    rerenderConversation()
+  }
+
   const installDiscoveredPlugin = async (pluginId: string): Promise<void> => {
     if (!window.bonzi || isSavingSettings || !pluginSettings) {
       return
@@ -652,9 +746,11 @@ export function renderApp(root: HTMLDivElement): void {
         return
       }
 
-      const confirmed = window.confirm(
-        `Install plugin "${availablePlugin.name}" now? This will run a package install command in the Bonzi workspace.`
-      )
+      const confirmed =
+        approvalSettings?.approvalsEnabled === false ||
+        window.confirm(
+          `Install plugin "${availablePlugin.name}" now? This will run a package install command in the Bonzi workspace.`
+        )
 
       if (!confirmed) {
         setSettingsStatus('Install cancelled.')
@@ -707,9 +803,11 @@ export function renderApp(root: HTMLDivElement): void {
       return
     }
 
-    const confirmed = window.confirm(
-      `Uninstall plugin "${installedPlugin.name}"? This removes the package from Bonzi workspace dependencies.`
-    )
+    const confirmed =
+      approvalSettings?.approvalsEnabled === false ||
+      window.confirm(
+        `Uninstall plugin "${installedPlugin.name}"? This removes the package from Bonzi workspace dependencies.`
+      )
 
     if (!confirmed) {
       return
@@ -825,6 +923,64 @@ export function renderApp(root: HTMLDivElement): void {
       },
       'Saving plugin settings…'
     )
+  })
+
+  approvalSettingsEl.addEventListener('change', async (event) => {
+    const target = event.target
+
+    if (!(target instanceof HTMLInputElement) || !target.matches('[data-approval-toggle]')) {
+      return
+    }
+
+    if (!window.bonzi || isSavingApprovalSettings) {
+      target.checked = approvalSettings?.approvalsEnabled !== false
+      return
+    }
+
+    const approvalsEnabled = target.checked
+    const confirmedDisable = approvalsEnabled
+      ? true
+      : window.confirm(
+          'Disable action and workflow approvals? Bonzi will run approved action types automatically when workflows or action cards reach them.'
+        )
+
+    if (!confirmedDisable) {
+      target.checked = true
+      return
+    }
+
+    isSavingApprovalSettings = true
+    rerenderApprovalSettings()
+    setSettingsStatus(
+      approvalsEnabled ? 'Enabling approvals…' : 'Disabling approvals…'
+    )
+
+    try {
+      approvalSettings = await window.bonzi.settings.updateRuntimeApprovalSettings({
+        approvalsEnabled,
+        ...(approvalsEnabled ? {} : { confirmedDisable: true })
+      })
+
+      if (!approvalSettings.approvalsEnabled) {
+        pendingConfirmations.clear()
+        await autoRunPendingActionCards()
+      }
+
+      setSettingsStatus(
+        approvalSettings.approvalsEnabled
+          ? 'Action approvals enabled.'
+          : 'Action approvals disabled. Bonzi has more autonomy now.'
+      )
+      const nextShellState = await window.bonzi.app.getShellState()
+      applyShellState(nextShellState)
+      rerenderConversation()
+    } catch (error) {
+      setSettingsStatus(`Failed to update approval settings: ${String(error)}`)
+      await hydrateApprovalSettings()
+    } finally {
+      isSavingApprovalSettings = false
+      rerenderApprovalSettings()
+    }
   })
 
   pluginSettingsEl.addEventListener('click', async (event) => {

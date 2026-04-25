@@ -44,7 +44,11 @@ export async function buildRuntimePlugins(options: {
   }
 
   if (options.runtimeSettings.desktopActionsEnabled) {
-    plugins.push(createBonziDesktopActionsPlugin())
+    plugins.push(
+      createBonziDesktopActionsPlugin({
+        approvalsEnabled: options.runtimeSettings.approvalsEnabled
+      })
+    )
   }
 
   const providerPlugin =
@@ -75,7 +79,8 @@ export function createRuntimeCharacter(options: {
   return createBonziCharacter({
     systemPromptOverride: options.config.systemPromptOverride,
     desktopActionsEnabled: options.runtimeSettings.desktopActionsEnabled,
-    contextEnabled: options.runtimeSettings.contextEnabled
+    contextEnabled: options.runtimeSettings.contextEnabled,
+    approvalsEnabled: options.runtimeSettings.approvalsEnabled
   })
 }
 

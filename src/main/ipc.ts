@@ -11,7 +11,8 @@ import type {
   ElizaPluginUninstallRequest,
   RespondWorkflowApprovalRequest,
   ShellState,
-  UpdateElizaPluginSettingsRequest
+  UpdateElizaPluginSettingsRequest,
+  UpdateRuntimeApprovalSettingsRequest
 } from '../shared/contracts'
 
 interface RegisterIpcHandlersOptions {
@@ -49,7 +50,8 @@ export function registerIpcHandlers(
       assistantService.getProviderInfo(),
       assistantService.getStartupWarnings(),
       assistantService.getRuntimeStatus(),
-      assistantService.getAvailableActionTypes()
+      assistantService.getAvailableActionTypes(),
+      assistantService.getRuntimeApprovalSettings()
     )
   })
 
@@ -68,6 +70,17 @@ export function registerIpcHandlers(
     'settings:update-eliza-plugins',
     async (_event, request: UpdateElizaPluginSettingsRequest) => {
       return assistantService.updatePluginSettings(request)
+    }
+  )
+
+  ipcMain.handle('settings:get-runtime-approval-settings', () => {
+    return assistantService.getRuntimeApprovalSettings()
+  })
+
+  ipcMain.handle(
+    'settings:update-runtime-approval-settings',
+    async (_event, request: UpdateRuntimeApprovalSettingsRequest) => {
+      return assistantService.updateRuntimeApprovalSettings(request)
     }
   )
 

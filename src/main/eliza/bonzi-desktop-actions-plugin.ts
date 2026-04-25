@@ -66,8 +66,7 @@ const BONZI_DESKTOP_ACTION_SPECS = [
     elizaName: 'CLOSE_WINDOW',
     type: 'close-window',
     title: 'Close companion window',
-    description:
-      'Ask Bonzi to close the companion window. Bonzi will require explicit UI confirmation before closing.',
+    description: 'Ask Bonzi to close the companion window.',
     requiresConfirmation: true,
     similes: ['CLOSE_BONZI', 'QUIT_WINDOW', 'close-window']
   },
@@ -213,23 +212,35 @@ const ACTION_SPEC_BY_TYPE = new Map<AssistantActionType, BonziDesktopActionSpec>
   BONZI_DESKTOP_ACTION_SPECS.map((spec) => [spec.type, spec])
 )
 
-export function formatBonziDesktopActionPromptList(): string {
+export function formatBonziDesktopActionPromptList(options: {
+  approvalsEnabled?: boolean
+} = {}): string {
+  const approvalsEnabled = options.approvalsEnabled !== false
+
   return BONZI_DESKTOP_ACTION_SPECS.map(
     (spec) =>
       `- ${spec.elizaName}: ${spec.description}${
-        spec.requiresConfirmation
+        spec.requiresConfirmation && approvalsEnabled
           ? ' Bonzi requires explicit UI confirmation before execution.'
           : ''
       }`
   ).join('\n')
 }
 
-export function createBonziDesktopActionsPlugin(): Plugin {
+export function createBonziDesktopActionsPlugin(options: {
+  approvalsEnabled?: boolean
+} = {}): Plugin {
+  const approvalsEnabled = options.approvalsEnabled !== false
+
   return {
     name: 'bonzi-desktop-actions',
     description:
-      'Native elizaOS actions for Bonzi desktop capabilities. Actions propose Bonzi UI operations; Electron execution remains in the confirmation-aware Bonzi bridge.',
-    actions: BONZI_DESKTOP_ACTION_SPECS.map(createBonziDesktopAction)
+      approvalsEnabled
+        ? 'Native elizaOS actions for Bonzi desktop capabilities. Actions propose Bonzi UI operations; Electron execution remains in the confirmation-aware Bonzi bridge.'
+        : 'Native elizaOS actions for Bonzi desktop capabilities. Actions propose Bonzi UI operations; approval prompts are disabled by user setting.',
+    actions: BONZI_DESKTOP_ACTION_SPECS.map((spec) =>
+      createBonziDesktopAction(spec, { approvalsEnabled })
+    )
   }
 }
 
@@ -262,21 +273,26 @@ export function createBonziDesktopActionProposal(
   }
 }
 
-function createBonziDesktopAction(spec: BonziDesktopActionSpec): Action {
+function createBonziDesktopAction(
+  spec: BonziDesktopActionSpec,
+  pluginOptions: { approvalsEnabled: boolean }
+): Action {
   return {
     name: spec.elizaName,
     similes: spec.similes,
     description: [
       spec.description,
       'This does not directly execute Electron/window side effects inside elizaOS.',
-      'It creates a Bonzi UI action card; the user approves/runs it through Bonzi.'
+      pluginOptions.approvalsEnabled
+        ? 'It creates a Bonzi UI action card; the user approves/runs it through Bonzi.'
+        : 'It creates a Bonzi UI action card; approval prompts are currently disabled by user setting.'
     ].join(' '),
     parameters: spec.parameters,
     validate: async () => true,
     handler: async (_runtime, message, _state, options) => {
       const parameters = isRecord(options?.parameters) ? options.parameters : {}
       const messageText = normalizeText(message.content.text)
-      return createBonziActionResult(spec, parameters, messageText)
+      return createBonziActionResult(spec, parameters, messageText, pluginOptions)
     }
   }
 }
@@ -284,7 +300,8 @@ function createBonziDesktopAction(spec: BonziDesktopActionSpec): Action {
 function createBonziActionResult(
   spec: BonziDesktopActionSpec,
   parameters: Record<string, unknown>,
-  messageText: string
+  messageText: string,
+  options: { approvalsEnabled: boolean }
 ): ActionResult {
   const params = createActionParams(spec.type, parameters, messageText)
 
@@ -301,7 +318,7 @@ function createBonziActionResult(
   }
 
   const proposal = createBonziDesktopActionProposal(spec.type, params)
-  const confirmationNote = spec.requiresConfirmation
+  const confirmationNote = spec.requiresConfirmation && options.approvalsEnabled
     ? ' It will require explicit confirmation in Bonzi before anything happens.'
     : ''
 

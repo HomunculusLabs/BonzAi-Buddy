@@ -17,7 +17,9 @@ import type {
   ElizaPluginOperationResult,
   ElizaPluginSettings,
   ElizaPluginUninstallRequest,
+  RuntimeApprovalSettings,
   UpdateElizaPluginSettingsRequest,
+  UpdateRuntimeApprovalSettingsRequest,
   ShellState
 } from '../shared/contracts'
 
@@ -32,7 +34,13 @@ const bonziApi = {
     updateElizaPlugins: (
       request: UpdateElizaPluginSettingsRequest
     ): Promise<ElizaPluginSettings> =>
-      ipcRenderer.invoke('settings:update-eliza-plugins', request)
+      ipcRenderer.invoke('settings:update-eliza-plugins', request),
+    getRuntimeApprovalSettings: (): Promise<RuntimeApprovalSettings> =>
+      ipcRenderer.invoke('settings:get-runtime-approval-settings'),
+    updateRuntimeApprovalSettings: (
+      request: UpdateRuntimeApprovalSettingsRequest
+    ): Promise<RuntimeApprovalSettings> =>
+      ipcRenderer.invoke('settings:update-runtime-approval-settings', request)
   },
   plugins: {
     discover: (

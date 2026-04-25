@@ -364,6 +364,10 @@ p {
   accent-color: #8c57ff;
 }
 
+.approval-settings-row {
+  border-color: rgba(140, 87, 255, 0.22);
+}
+
 .plugin-row__button {
   min-height: 30px;
   padding: 0 10px;

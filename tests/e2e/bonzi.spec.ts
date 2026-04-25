@@ -158,6 +158,121 @@ test('manages bundled optional plugins from settings catalog', async () => {
   }
 })
 
+test('toggles runtime action approvals with explicit disable confirmation', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-approvals-'))
+  const env = {
+    ...process.env,
+    BONZI_E2E_MODE: '1',
+    BONZI_ASSISTANT_PROVIDER: 'eliza-classic',
+    BONZI_DISABLE_GPU: '1',
+    BONZI_OPAQUE_WINDOW: '1',
+    BONZI_DISABLE_VRM: '1',
+    BONZI_USER_DATA_DIR: userDataDir
+  }
+  delete env.ELECTRON_RENDERER_URL
+
+  const app = await electron.launch({
+    args: [join(process.cwd(), 'out/main/index.js')],
+    env
+  })
+
+  try {
+    const window = await app.firstWindow()
+
+    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+    await expect.poll(() =>
+      window.evaluate(() => window.bonzi.settings.getRuntimeApprovalSettings())
+    ).toEqual({ approvalsEnabled: true })
+
+    await window.locator('[data-action="settings"]').click()
+
+    const approvalToggle = window.locator('[data-approval-toggle]')
+    await expect(approvalToggle).toBeChecked()
+
+    window.once('dialog', async (dialog) => {
+      expect(dialog.type()).toBe('confirm')
+      await dialog.accept()
+    })
+    await approvalToggle.uncheck()
+    await expect(approvalToggle).not.toBeChecked()
+
+    const persistedDisabled = JSON.parse(
+      await readFile(join(userDataDir, 'bonzi-settings.json'), 'utf8')
+    ) as { approvalsEnabled?: boolean }
+
+    expect(persistedDisabled.approvalsEnabled).toBe(false)
+    await expect.poll(() =>
+      window.evaluate(() =>
+        window.bonzi.app
+          .getShellState()
+          .then((state) => state.assistant.approvals.approvalsEnabled)
+      )
+    ).toBe(false)
+
+    await approvalToggle.check()
+    await expect(approvalToggle).toBeChecked()
+
+    const persistedEnabled = JSON.parse(
+      await readFile(join(userDataDir, 'bonzi-settings.json'), 'utf8')
+    ) as { approvalsEnabled?: boolean }
+
+    expect(persistedEnabled.approvalsEnabled).toBe(true)
+  } finally {
+    await app.close()
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
+test('auto-runs action cards when approvals are disabled', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-approval-label-'))
+  const env = {
+    ...process.env,
+    BONZI_E2E_MODE: '1',
+    BONZI_ASSISTANT_PROVIDER: 'eliza-classic',
+    BONZI_DISABLE_GPU: '1',
+    BONZI_OPAQUE_WINDOW: '1',
+    BONZI_DISABLE_VRM: '1',
+    BONZI_USER_DATA_DIR: userDataDir
+  }
+  delete env.ELECTRON_RENDERER_URL
+
+  const app = await electron.launch({
+    args: [join(process.cwd(), 'out/main/index.js')],
+    env
+  })
+
+  try {
+    const window = await app.firstWindow()
+
+    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+    await window.locator('.stage-shell').dblclick()
+
+    const commandInput = window.locator('#assistant-command')
+    await commandInput.fill('show shell state e2e')
+    await commandInput.press('Enter')
+
+    await expect(window.locator('.action-chip')).toHaveCount(1)
+    await expect(window.locator('[data-action-id]')).toHaveText('Run action')
+
+    await window.locator('[data-action="settings"]').click()
+    window.once('dialog', async (dialog) => {
+      expect(dialog.type()).toBe('confirm')
+      await dialog.accept()
+    })
+    await window.locator('[data-approval-toggle]').uncheck()
+    await expect(window.locator('[data-approval-toggle]')).not.toBeChecked()
+
+    await commandInput.fill('show shell state again e2e')
+    await commandInput.press('Enter')
+
+    await expect(window.locator('.action-chip').last()).toContainText('completed')
+    await expect(window.locator('[data-action-id]').last()).toHaveText('Completed')
+  } finally {
+    await app.close()
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
 test('migrates legacy curated plugin settings to V2 records', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-plugins-legacy-'))
   await writeFile(

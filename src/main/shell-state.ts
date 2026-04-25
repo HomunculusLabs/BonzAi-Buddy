@@ -2,6 +2,7 @@ import {
   ASSISTANT_ACTION_TYPES,
   type AssistantProviderInfo,
   type AssistantRuntimeStatus,
+  type RuntimeApprovalSettings,
   type ShellState,
   type ShellStateStage
 } from '../shared/contracts'
@@ -12,8 +13,13 @@ export function buildShellState(
   provider: AssistantProviderInfo,
   warnings: string[],
   runtime: AssistantRuntimeStatus,
-  availableActions = [...ASSISTANT_ACTION_TYPES]
+  availableActions = [...ASSISTANT_ACTION_TYPES],
+  approvals: RuntimeApprovalSettings = { approvalsEnabled: true }
 ): ShellState {
+  const approvalNote = approvals.approvalsEnabled
+    ? 'Desktop actions remain constrained to Bonzi’s small allowlist, with confirmation still required for sensitive actions like close-window.'
+    : 'Desktop actions remain constrained to Bonzi’s small allowlist. Approval prompts are disabled, so sensitive actions run when clicked.'
+
   return {
     stage: shellStageForRuntime(runtime),
     platform: process.platform,
@@ -21,13 +27,14 @@ export function buildShellState(
     notes: [
       'Bonzi now runs an embedded Eliza runtime in the Electron main process.',
       'Assistant history is persisted locally through the runtime manager, while renderer UI behavior remains unchanged for now.',
-      'Desktop actions remain constrained to Bonzi’s small allowlist, with confirmation still required for sensitive actions like close-window.'
+      approvalNote
     ],
     assistant: {
       provider,
       availableActions,
       warnings,
-      runtime
+      runtime,
+      approvals
     }
   }
 }

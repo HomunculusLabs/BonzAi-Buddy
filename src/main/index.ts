@@ -28,7 +28,8 @@ function getShellState() {
     assistantService.getProviderInfo(),
     assistantService.getStartupWarnings(),
     assistantService.getRuntimeStatus(),
-    assistantService.getAvailableActionTypes()
+    assistantService.getAvailableActionTypes(),
+    assistantService.getRuntimeApprovalSettings()
   )
 }
 

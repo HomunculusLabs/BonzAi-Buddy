@@ -129,6 +129,15 @@ export interface UpdateElizaPluginSettingsRequest {
   operations: UpdateElizaPluginSettingsOperation[]
 }
 
+export interface RuntimeApprovalSettings {
+  approvalsEnabled: boolean
+}
+
+export interface UpdateRuntimeApprovalSettingsRequest {
+  approvalsEnabled: boolean
+  confirmedDisable?: boolean
+}
+
 export interface ElizaPluginDiscoveryRequest {
   forceRefresh?: boolean
 }
@@ -375,5 +384,6 @@ export interface ShellState {
     availableActions: AssistantActionType[]
     warnings: string[]
     runtime: AssistantRuntimeStatus
+    approvals: RuntimeApprovalSettings
   }
 }

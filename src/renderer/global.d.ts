@@ -18,7 +18,9 @@ import type {
   ElizaPluginOperationResult,
   ElizaPluginSettings,
   ElizaPluginUninstallRequest,
+  RuntimeApprovalSettings,
   UpdateElizaPluginSettingsRequest,
+  UpdateRuntimeApprovalSettingsRequest,
   ShellState
 } from '../shared/contracts'
 
@@ -33,6 +35,10 @@ declare global {
         updateElizaPlugins: (
           request: UpdateElizaPluginSettingsRequest
         ) => Promise<ElizaPluginSettings>
+        getRuntimeApprovalSettings: () => Promise<RuntimeApprovalSettings>
+        updateRuntimeApprovalSettings: (
+          request: UpdateRuntimeApprovalSettingsRequest
+        ) => Promise<RuntimeApprovalSettings>
       }
       plugins: {
         discover: (

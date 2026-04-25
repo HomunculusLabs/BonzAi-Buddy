@@ -85,7 +85,10 @@ function getCurrentWorkflowStep(
   return run.steps.at(-1) ?? null
 }
 
-function renderWorkflowSummary(run: BonziWorkflowRunSnapshot): string {
+function renderWorkflowSummary(
+  run: BonziWorkflowRunSnapshot,
+  options: { approvalsEnabled: boolean }
+): string {
   const completedCount = run.steps.filter((step) => step.status === 'completed').length
   const failedCount = run.steps.filter((step) => step.status === 'failed').length
   const awaitingApprovalCount = run.steps.filter(
@@ -110,6 +113,10 @@ function renderWorkflowSummary(run: BonziWorkflowRunSnapshot): string {
     return 'Workflow interrupted'
   }
 
+  if (awaitingApprovalCount > 0 && !options.approvalsEnabled) {
+    return 'Approvals disabled; continuing automatically'
+  }
+
   if (awaitingApprovalCount > 0) {
     return `Waiting for approval on ${awaitingApprovalCount} step${awaitingApprovalCount === 1 ? '' : 's'}`
   }
@@ -117,7 +124,10 @@ function renderWorkflowSummary(run: BonziWorkflowRunSnapshot): string {
   return `${completedCount}/${run.steps.length} steps completed`
 }
 
-function renderWorkflowRun(run: BonziWorkflowRunSnapshot): string {
+function renderWorkflowRun(
+  run: BonziWorkflowRunSnapshot,
+  options: { approvalsEnabled: boolean }
+): string {
   const currentStep = getCurrentWorkflowStep(run)
   const stepMarkup =
     run.steps.length === 0
@@ -130,8 +140,12 @@ function renderWorkflowRun(run: BonziWorkflowRunSnapshot): string {
               step.status === 'awaiting_approval' && step.approvalPrompt
                 ? `<p class="workflow-card__approval-prompt">${escapeHtml(step.approvalPrompt)}</p>`
                 : ''
+            const autoApprovalNote =
+              step.status === 'awaiting_approval' && !options.approvalsEnabled
+                ? '<p class="workflow-card__approval-prompt">Approvals are disabled. Bonzi will continue automatically when the runtime resumes this step.</p>'
+                : ''
             const controls =
-              step.status === 'awaiting_approval'
+              step.status === 'awaiting_approval' && options.approvalsEnabled
                 ? `
                     <div class="workflow-card__controls">
                       <button
@@ -164,6 +178,7 @@ function renderWorkflowRun(run: BonziWorkflowRunSnapshot): string {
                 </div>
                 ${detail}
                 ${approvalPrompt}
+                ${autoApprovalNote}
                 ${controls}
               </li>
             `
@@ -189,7 +204,7 @@ function renderWorkflowRun(run: BonziWorkflowRunSnapshot): string {
         <strong>Workflow</strong>
         <span class="workflow-card__run-status">${escapeHtml(labelForWorkflowStatus(run.status))}</span>
       </header>
-      <p class="workflow-card__summary">${escapeHtml(renderWorkflowSummary(run))}</p>
+      <p class="workflow-card__summary">${escapeHtml(renderWorkflowSummary(run, options))}</p>
       ${currentStep ? `<p class="workflow-card__current">Current step: ${escapeHtml(currentStep.title)}</p>` : ''}
       ${run.error ? `<p class="workflow-card__error">${escapeHtml(run.error)}</p>` : ''}
       <ol class="workflow-card__steps">
@@ -251,6 +266,7 @@ export function renderConversation(
   options: {
     isAwaitingAssistant: boolean
     isUiVisible: boolean
+    approvalsEnabled: boolean
   }
 ): void {
   if (options.isAwaitingAssistant) {
@@ -293,10 +309,11 @@ export function renderConversation(
               const label =
                 action.status === 'completed'
                   ? 'Completed'
-                  : action.requiresConfirmation &&
+                  : options.approvalsEnabled &&
+                    action.requiresConfirmation &&
                       pendingConfirmations.has(action.id)
                     ? 'Approve & run'
-                    : action.requiresConfirmation
+                    : options.approvalsEnabled && action.requiresConfirmation
                       ? 'Request confirmation'
                       : 'Run action'
 
@@ -330,7 +347,11 @@ export function renderConversation(
     )
     .join('')
 
-  const workflowMarkup = workflowRun ? renderWorkflowRun(workflowRun) : ''
+  const workflowMarkup = workflowRun
+    ? renderWorkflowRun(workflowRun, {
+        approvalsEnabled: options.approvalsEnabled
+      })
+    : ''
 
   chatLog.dataset.bubbleTone = message.role
   chatLog.innerHTML = `

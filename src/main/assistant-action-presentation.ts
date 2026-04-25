@@ -84,18 +84,24 @@ const ACTION_DEFAULTS: Record<
 }
 
 export function createPendingAssistantAction(
-  action: BonziProposedAction
+  action: BonziProposedAction,
+  options: { approvalsEnabled?: boolean } = {}
 ): AssistantAction {
   const defaults = ACTION_DEFAULTS[action.type]
   const params = sanitizeAssistantActionParams(action.params)
+  const requiresConfirmation =
+    defaults.requiresConfirmation || action.requiresConfirmation === true
+  const description = action.description?.trim() || defaults.description
 
   return {
     id: crypto.randomUUID(),
     type: action.type,
     title: action.title?.trim() || defaults.title,
-    description: action.description?.trim() || defaults.description,
-    requiresConfirmation:
-      defaults.requiresConfirmation || action.requiresConfirmation === true,
+    description:
+      requiresConfirmation && options.approvalsEnabled === false
+        ? `${description} Approvals are currently disabled, so this will run when clicked.`
+        : description,
+    requiresConfirmation,
     status: 'pending',
     ...(params ? { params } : {})
   }

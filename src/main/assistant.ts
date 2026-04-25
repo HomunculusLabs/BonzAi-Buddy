@@ -16,11 +16,13 @@ import {
   type ElizaPluginDiscoveryRequest,
   type RespondWorkflowApprovalRequest,
   type RespondWorkflowApprovalResponse,
+  type RuntimeApprovalSettings,
   type ElizaPluginInstallRequest,
   type ElizaPluginOperationResult,
   type ElizaPluginSettings,
   type ElizaPluginUninstallRequest,
   type UpdateElizaPluginSettingsRequest,
+  type UpdateRuntimeApprovalSettingsRequest,
   type ShellState
 } from '../shared/contracts'
 import { BonziRuntimeManager } from './eliza/runtime-manager'
@@ -38,6 +40,10 @@ export interface AssistantService {
   getStartupWarnings: () => string[]
   getRuntimeStatus: () => AssistantRuntimeStatus
   getPluginSettings: () => ElizaPluginSettings
+  getRuntimeApprovalSettings: () => RuntimeApprovalSettings
+  updateRuntimeApprovalSettings: (
+    request: UpdateRuntimeApprovalSettingsRequest
+  ) => Promise<RuntimeApprovalSettings>
   discoverPlugins: (
     request?: ElizaPluginDiscoveryRequest
   ) => Promise<ElizaPluginSettings>
@@ -86,6 +92,12 @@ export function createAssistantService(
     getStartupWarnings: () => runtimeManager.getStartupWarnings(),
     getRuntimeStatus: () => runtimeManager.getRuntimeStatus(),
     getPluginSettings: () => runtimeManager.getPluginSettings(),
+    getRuntimeApprovalSettings: () => runtimeManager.getRuntimeApprovalSettings(),
+    async updateRuntimeApprovalSettings(
+      request: UpdateRuntimeApprovalSettingsRequest
+    ): Promise<RuntimeApprovalSettings> {
+      return runtimeManager.updateRuntimeApprovalSettings(request)
+    },
     discoverPlugins: (request) => runtimeManager.discoverPlugins(request),
     updatePluginSettings: (request) => runtimeManager.updatePluginSettings(request),
     installPlugin: (request) => runtimeManager.installPlugin(request),
@@ -178,11 +190,27 @@ export function createAssistantService(
 
       try {
         const runtimeTurn = await runtimeManager.sendCommand(normalizedRequest.command)
-        const actions = runtimeTurn.actions.map((action) => {
-          const pendingAction = createPendingAssistantAction(action)
+        const approvalSettings = runtimeManager.getRuntimeApprovalSettings()
+        const actions: AssistantAction[] = []
+
+        for (const action of runtimeTurn.actions) {
+          const pendingAction = createPendingAssistantAction(action, approvalSettings)
           pendingActions.set(pendingAction.id, pendingAction)
-          return pendingAction
-        })
+
+          if (approvalSettings.approvalsEnabled) {
+            actions.push(pendingAction)
+            continue
+          }
+
+          const executedAction = await executePendingAction(pendingAction, {
+            getShellState: options.getShellState,
+            getCompanionWindow: options.getCompanionWindow,
+            recordActionObservation: (completedAction, message) =>
+              runtimeManager.recordActionObservation(completedAction, message)
+          })
+          pendingActions.set(executedAction.id, executedAction)
+          actions.push(executedAction)
+        }
 
         return {
           ok: true,
@@ -234,7 +262,10 @@ export function createAssistantService(
         }
       }
 
-      if (action.requiresConfirmation && !normalizedRequest.confirmed) {
+      const approvalsEnabled =
+        runtimeManager.getRuntimeApprovalSettings().approvalsEnabled
+
+      if (approvalsEnabled && action.requiresConfirmation && !normalizedRequest.confirmed) {
         const awaitingConfirmation: AssistantAction = {
           ...action,
           status: 'needs_confirmation'
@@ -250,46 +281,20 @@ export function createAssistantService(
         }
       }
 
-      try {
-        const message = await executeAssistantAction(action, {
-          shellState: options.getShellState(),
-          companionWindow: options.getCompanionWindow()
-        })
+      const executedAction = await executePendingAction(action, {
+        getShellState: options.getShellState,
+        getCompanionWindow: options.getCompanionWindow,
+        recordActionObservation: (completedAction, message) =>
+          runtimeManager.recordActionObservation(completedAction, message)
+      })
 
-        const completedAction: AssistantAction = {
-          ...action,
-          status: 'completed',
-          resultMessage: message
-        }
+      pendingActions.set(executedAction.id, executedAction)
 
-        pendingActions.set(completedAction.id, completedAction)
-        await runtimeManager.recordActionObservation(completedAction, message)
-
-        return {
-          ok: true,
-          action: completedAction,
-          message,
-          confirmationRequired: false
-        }
-      } catch (error) {
-        const failedAction: AssistantAction = {
-          ...action,
-          status: 'failed',
-          resultMessage: normalizeError(error)
-        }
-
-        pendingActions.set(failedAction.id, failedAction)
-        await runtimeManager.recordActionObservation(
-          failedAction,
-          failedAction.resultMessage ?? 'Action failed.'
-        )
-
-        return {
-          ok: false,
-          action: failedAction,
-          message: failedAction.resultMessage ?? 'Action failed.',
-          confirmationRequired: false
-        }
+      return {
+        ok: executedAction.status === 'completed',
+        action: executedAction,
+        message: executedAction.resultMessage ?? 'Action finished.',
+        confirmationRequired: false
       }
     },
     async dispose(): Promise<void> {
@@ -445,6 +450,46 @@ function createAssistantMessage(
     role,
     content,
     createdAt: new Date().toISOString()
+  }
+}
+
+async function executePendingAction(
+  action: AssistantAction,
+  deps: {
+    getShellState: () => ShellState
+    getCompanionWindow: () => BrowserWindow | null
+    recordActionObservation: (
+      action: AssistantAction,
+      message: string
+    ) => Promise<void>
+  }
+): Promise<AssistantAction> {
+  try {
+    const message = await executeAssistantAction(action, {
+      shellState: deps.getShellState(),
+      companionWindow: deps.getCompanionWindow()
+    })
+
+    const completedAction: AssistantAction = {
+      ...action,
+      status: 'completed',
+      resultMessage: message
+    }
+
+    await deps.recordActionObservation(completedAction, message)
+    return completedAction
+  } catch (error) {
+    const failedAction: AssistantAction = {
+      ...action,
+      status: 'failed',
+      resultMessage: normalizeError(error)
+    }
+
+    await deps.recordActionObservation(
+      failedAction,
+      failedAction.resultMessage ?? 'Action failed.'
+    )
+    return failedAction
   }
 }
 

@@ -60,6 +60,7 @@ export class BonziWorkflowManager {
   private readonly runsById = new Map<string, BonziWorkflowRunSnapshot>()
   private readonly activeRunStorage = new AsyncLocalStorage<string>()
   private readonly pendingApprovals = new Map<string, PendingApprovalEntry>()
+  private approvalsEnabled = true
   private runOrder: string[] = []
 
   constructor(options: BonziWorkflowManagerOptions = {}) {
@@ -193,6 +194,16 @@ export class BonziWorkflowManager {
       return existing.promise
     }
 
+    if (!this.approvalsEnabled) {
+      const step = run.steps.find((candidate) => candidate.id === stepId)
+      if (!step || isTerminalStepStatus(step.status)) {
+        return false
+      }
+
+      const autoApproved = this.autoApproveStep(runId, stepId, prompt)
+      return Boolean(autoApproved)
+    }
+
     const updated = this.updateRun(runId, (current) => {
       const step = current.steps.find((candidate) => candidate.id === stepId)
 
@@ -215,7 +226,7 @@ export class BonziWorkflowManager {
             status: 'awaiting_approval',
             updatedAt: nowIso,
             finishedAt: undefined,
-            approvalPrompt: prompt,
+            approvalPrompt: prompt || candidate.approvalPrompt,
             approvalRequestedAt: nowIso,
             approvalRespondedAt: undefined,
             approvalApproved: undefined
@@ -252,6 +263,24 @@ export class BonziWorkflowManager {
     })
 
     return promise
+  }
+
+  setApprovalsEnabled(enabled: boolean): void {
+    const nextEnabled = enabled === true
+
+    if (this.approvalsEnabled === nextEnabled) {
+      return
+    }
+
+    this.approvalsEnabled = nextEnabled
+
+    if (!nextEnabled) {
+      this.approvePendingApprovals()
+    }
+  }
+
+  getApprovalsEnabled(): boolean {
+    return this.approvalsEnabled
   }
 
   respondToApproval(input: {
@@ -532,6 +561,54 @@ export class BonziWorkflowManager {
 
     this.pendingApprovals.clear()
     this.listeners.clear()
+  }
+
+  private autoApproveStep(
+    runId: string,
+    stepId: string,
+    prompt: string
+  ): BonziWorkflowRunSnapshot | null {
+    return this.updateRun(runId, (current) => {
+      const step = current.steps.find((candidate) => candidate.id === stepId)
+
+      if (!step || isTerminalStepStatus(step.status) || isTerminalRunStatus(current.status)) {
+        return current
+      }
+
+      const nowIso = this.now().toISOString()
+
+      return {
+        ...current,
+        status: current.status === 'queued' || current.status === 'awaiting_user'
+          ? 'running'
+          : current.status,
+        steps: current.steps.map((candidate) => {
+          if (candidate.id !== stepId) {
+            return candidate
+          }
+
+          return {
+            ...candidate,
+            status: 'running',
+            updatedAt: nowIso,
+            finishedAt: undefined,
+            approvalPrompt: prompt || candidate.approvalPrompt,
+            approvalRequestedAt: nowIso,
+            approvalRespondedAt: nowIso,
+            approvalApproved: true
+          }
+        })
+      }
+    })
+  }
+
+  private approvePendingApprovals(): void {
+    for (const [approvalKey, pending] of Array.from(this.pendingApprovals.entries())) {
+      this.autoApproveStep(pending.runId, pending.stepId, '')
+      this.pendingApprovals.delete(approvalKey)
+      clearTimeout(pending.timeout)
+      pending.resolve(true)
+    }
   }
 
   private transitionStep(

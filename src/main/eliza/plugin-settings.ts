@@ -14,13 +14,16 @@ import {
   type ElizaPluginLifecycleStatus,
   type ElizaPluginSettings,
   type ElizaPluginSource,
+  type RuntimeApprovalSettings,
   type UpdateElizaPluginSettingsOperation,
-  type UpdateElizaPluginSettingsRequest
+  type UpdateElizaPluginSettingsRequest,
+  type UpdateRuntimeApprovalSettingsRequest
 } from '../../shared/contracts'
 
 export interface BonziElizaPluginRuntimeSettings {
   contextEnabled: boolean
   desktopActionsEnabled: boolean
+  approvalsEnabled: boolean
 }
 
 const SETTINGS_FILE_NAME = 'bonzi-settings.json'
@@ -63,6 +66,7 @@ export interface BonziPersistedPluginRecordSnapshot {
 interface PersistedSettingsFileV2 {
   schemaVersion: 2
   plugins: Record<string, PersistedPluginRecord>
+  approvalsEnabled?: boolean
 }
 
 interface PersistedSettingsFileLegacy {
@@ -74,8 +78,9 @@ interface PersistedSettingsFileLegacy {
 
 type NormalizedPluginInventory = Record<string, PersistedPluginRecord>
 
-interface LoadedPluginInventory {
+interface LoadedSettingsState {
   inventory: NormalizedPluginInventory
+  approvalsEnabled: boolean
   needsRewrite: boolean
   fileExisted: boolean
 }
@@ -101,7 +106,8 @@ const OPTIONAL_PLUGIN_CATALOG = [
 
 const DEFAULT_PLUGIN_RUNTIME_SETTINGS: BonziElizaPluginRuntimeSettings = {
   contextEnabled: true,
-  desktopActionsEnabled: true
+  desktopActionsEnabled: true,
+  approvalsEnabled: true
 }
 
 const PROVIDER_PACKAGE_NAMES: Record<AssistantProviderInfo['kind'], string> = {
@@ -117,7 +123,8 @@ export class BonziPluginSettingsStore {
   }
 
   getRuntimeSettings(): BonziElizaPluginRuntimeSettings {
-    const state = this.getNormalizedPluginInventory()
+    const loaded = this.readPersistedPluginInventory()
+    const state = loaded.inventory
 
     return {
       contextEnabled:
@@ -125,7 +132,37 @@ export class BonziPluginSettingsStore {
         DEFAULT_PLUGIN_RUNTIME_SETTINGS.contextEnabled,
       desktopActionsEnabled:
         state['bonzi-desktop-actions']?.enabled ??
-        DEFAULT_PLUGIN_RUNTIME_SETTINGS.desktopActionsEnabled
+        DEFAULT_PLUGIN_RUNTIME_SETTINGS.desktopActionsEnabled,
+      approvalsEnabled: loaded.approvalsEnabled
+    }
+  }
+
+  getRuntimeApprovalSettings(): RuntimeApprovalSettings {
+    return {
+      approvalsEnabled: this.readPersistedPluginInventory().approvalsEnabled
+    }
+  }
+
+  updateRuntimeApprovalSettings(
+    request: UpdateRuntimeApprovalSettingsRequest
+  ): RuntimeApprovalSettings {
+    if (!isRecord(request) || typeof request.approvalsEnabled !== 'boolean') {
+      throw new Error('Approval settings update must include an approvalsEnabled boolean.')
+    }
+
+    if (request.approvalsEnabled === false && request.confirmedDisable !== true) {
+      throw new Error('Disabling approvals requires explicit confirmation.')
+    }
+
+    const loaded = this.readPersistedPluginInventory()
+    this.writePersistedSettings({
+      schemaVersion: 2,
+      plugins: loaded.inventory,
+      approvalsEnabled: request.approvalsEnabled
+    })
+
+    return {
+      approvalsEnabled: request.approvalsEnabled
     }
   }
 
@@ -265,7 +302,8 @@ export class BonziPluginSettingsStore {
 
     this.writePersistedSettings({
       schemaVersion: 2,
-      plugins: state
+      plugins: state,
+      approvalsEnabled: loaded.approvalsEnabled
     })
   }
 
@@ -283,7 +321,8 @@ export class BonziPluginSettingsStore {
 
     this.writePersistedSettings({
       schemaVersion: 2,
-      plugins: state
+      plugins: state,
+      approvalsEnabled: loaded.approvalsEnabled
     })
   }
 
@@ -331,7 +370,8 @@ export class BonziPluginSettingsStore {
 
     this.writePersistedSettings({
       schemaVersion: 2,
-      plugins: state
+      plugins: state,
+      approvalsEnabled: loaded.approvalsEnabled
     })
   }
 
@@ -401,7 +441,8 @@ export class BonziPluginSettingsStore {
 
     this.writePersistedSettings({
       schemaVersion: 2,
-      plugins: state
+      plugins: state,
+      approvalsEnabled: loaded.approvalsEnabled
     })
 
     return this.getSettings(provider)
@@ -469,10 +510,11 @@ export class BonziPluginSettingsStore {
     }
   }
 
-  private readPersistedPluginInventory(): LoadedPluginInventory {
+  private readPersistedPluginInventory(): LoadedSettingsState {
     if (!existsSync(this.settingsPath)) {
       return {
         inventory: withBuiltInDefaults({}).inventory,
+        approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
         needsRewrite: false,
         fileExisted: false
       }
@@ -487,12 +529,14 @@ export class BonziPluginSettingsStore {
       if (needsRewrite && loaded.fileExisted) {
         this.writePersistedSettings({
           schemaVersion: 2,
-          plugins: withDefaults.inventory
+          plugins: withDefaults.inventory,
+          approvalsEnabled: loaded.approvalsEnabled
         })
       }
 
       return {
         inventory: withDefaults.inventory,
+        approvalsEnabled: loaded.approvalsEnabled,
         needsRewrite,
         fileExisted: loaded.fileExisted
       }
@@ -501,21 +545,24 @@ export class BonziPluginSettingsStore {
 
       this.writePersistedSettings({
         schemaVersion: 2,
-        plugins: withDefaults.inventory
+        plugins: withDefaults.inventory,
+        approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled
       })
 
       return {
         inventory: withDefaults.inventory,
+        approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
         needsRewrite: true,
         fileExisted: true
       }
     }
   }
 
-  private normalizeParsedSettings(parsed: unknown): LoadedPluginInventory {
+  private normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
     if (!isRecord(parsed)) {
       return {
         inventory: {},
+        approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
         needsRewrite: true,
         fileExisted: true
       }
@@ -527,6 +574,7 @@ export class BonziPluginSettingsStore {
       if (!isRecord(plugins)) {
         return {
           inventory: {},
+          approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
           needsRewrite: true,
           fileExisted: true
         }
@@ -534,6 +582,14 @@ export class BonziPluginSettingsStore {
 
       const inventory: NormalizedPluginInventory = {}
       let needsRewrite = false
+      const approvalsEnabled =
+        typeof parsed.approvalsEnabled === 'boolean'
+          ? parsed.approvalsEnabled
+          : DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled
+
+      if (typeof parsed.approvalsEnabled !== 'boolean') {
+        needsRewrite = true
+      }
 
       for (const [rawId, record] of Object.entries(plugins)) {
         const pluginId = normalizePluginId(rawId)
@@ -562,6 +618,7 @@ export class BonziPluginSettingsStore {
 
       return {
         inventory,
+        approvalsEnabled,
         needsRewrite,
         fileExisted: true
       }
@@ -570,6 +627,7 @@ export class BonziPluginSettingsStore {
     if (isLegacyPersistedSettingsFile(parsed)) {
       return {
         inventory: migrateLegacyInventory(parsed),
+        approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
         needsRewrite: true,
         fileExisted: true
       }
@@ -577,6 +635,7 @@ export class BonziPluginSettingsStore {
 
     return {
       inventory: {},
+      approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
       needsRewrite: true,
       fileExisted: true
     }

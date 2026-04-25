@@ -24,8 +24,10 @@ import {
   type ElizaPluginOperationResult,
   type ElizaPluginSettings,
   type ElizaPluginUninstallRequest,
+  type RuntimeApprovalSettings,
   type ShellState,
-  type UpdateElizaPluginSettingsRequest
+  type UpdateElizaPluginSettingsRequest,
+  type UpdateRuntimeApprovalSettingsRequest
 } from '../../shared/contracts'
 import {
   normalizeText
@@ -125,6 +127,9 @@ export class BonziRuntimeManager {
     this.workflowManager = new BonziWorkflowManager({
       persistencePath: options.workflowRunsPath
     })
+    this.workflowManager.setApprovalsEnabled(
+      this.pluginSettingsStore.getRuntimeApprovalSettings().approvalsEnabled
+    )
     this.pluginRuntimeResolver = new BonziPluginRuntimeResolver({
       settingsStore: this.pluginSettingsStore,
       userDataDir: app.getPath('userData'),
@@ -168,6 +173,19 @@ export class BonziRuntimeManager {
     return this.pluginSettingsStore.getSettings(this.getProviderInfo())
   }
 
+  getRuntimeApprovalSettings(): RuntimeApprovalSettings {
+    return this.pluginSettingsStore.getRuntimeApprovalSettings()
+  }
+
+  updateRuntimeApprovalSettings(
+    request: UpdateRuntimeApprovalSettingsRequest
+  ): RuntimeApprovalSettings {
+    const settings = this.pluginSettingsStore.updateRuntimeApprovalSettings(request)
+    this.workflowManager.setApprovalsEnabled(settings.approvalsEnabled)
+    this.configSignature = null
+    return settings
+  }
+
   async discoverPlugins(
     request: ElizaPluginDiscoveryRequest = {}
   ): Promise<ElizaPluginSettings> {
@@ -177,9 +195,12 @@ export class BonziRuntimeManager {
   async installPlugin(
     request: ElizaPluginInstallRequest
   ): Promise<ElizaPluginOperationResult> {
+    const effectiveRequest = this.getRuntimeApprovalSettings().approvalsEnabled
+      ? request
+      : { ...request, confirmed: true }
     const result = await this.pluginInstallationService.install(
       this.getProviderInfo(),
-      request
+      effectiveRequest
     )
 
     if (result.ok) {
@@ -192,9 +213,12 @@ export class BonziRuntimeManager {
   async uninstallPlugin(
     request: ElizaPluginUninstallRequest
   ): Promise<ElizaPluginOperationResult> {
+    const effectiveRequest = this.getRuntimeApprovalSettings().approvalsEnabled
+      ? request
+      : { ...request, confirmed: true }
     const result = await this.pluginInstallationService.uninstall(
       this.getProviderInfo(),
-      request
+      effectiveRequest
     )
 
     if (result.ok) {
@@ -585,11 +609,15 @@ export class BonziRuntimeManager {
   }
 
   private buildE2eTurn(command: string): BonziRuntimeTurn {
+    const lowerCommand = command.toLowerCase()
+
     return {
       reply: `E2E assistant reply for: ${command}`,
-      actions: command.toLowerCase().includes('shell')
-        ? [createBonziDesktopActionProposal('report-shell-state')]
-        : [],
+      actions: lowerCommand.includes('close')
+        ? [createBonziDesktopActionProposal('close-window')]
+        : lowerCommand.includes('shell')
+          ? [createBonziDesktopActionProposal('report-shell-state')]
+          : [],
       warnings: []
     }
   }
