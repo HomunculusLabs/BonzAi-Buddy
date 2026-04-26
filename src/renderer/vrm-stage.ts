@@ -24,6 +24,7 @@ interface VrmStageCallbacks {
 
 export interface VrmStageController {
   dispose: () => void
+  hitTestClientPoint: (clientX: number, clientY: number) => boolean | null
   load: (assetPath: string) => Promise<void>
   playBuiltInEmote: (emoteId: AssistantEventEmoteId) => boolean
 }
@@ -35,6 +36,8 @@ export function createVrmStage(
   const stageScene = createVrmStageScene(canvas)
   const loader = new GLTFLoader()
   const clock = new THREE.Clock()
+  const raycaster = new THREE.Raycaster()
+  const hitTestPointer = new THREE.Vector2()
 
   let animationFrameId = 0
   let activeLoadId = 0
@@ -50,6 +53,7 @@ export function createVrmStage(
 
   return {
     dispose,
+    hitTestClientPoint,
     load,
     playBuiltInEmote
   }
@@ -177,6 +181,32 @@ export function createVrmStage(
     tick()
   }
 
+  function hitTestClientPoint(clientX: number, clientY: number): boolean | null {
+    if (disposed || !currentAvatar) {
+      return null
+    }
+
+    const rect = canvas.getBoundingClientRect()
+
+    if (rect.width <= 0 || rect.height <= 0) {
+      return null
+    }
+
+    hitTestPointer.set(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -(((clientY - rect.top) / rect.height) * 2 - 1)
+    )
+    raycaster.setFromCamera(hitTestPointer, stageScene.camera)
+
+    const avatarScene = currentAvatar.vrm.scene
+
+    return raycaster
+      .intersectObject(avatarScene, true)
+      .some((intersection) =>
+        isVisibleHitTestIntersection(intersection, avatarScene)
+      )
+  }
+
   function playBuiltInEmote(emoteId: AssistantEventEmoteId): boolean {
     if (disposed || !currentAnimation || !currentAvatar) {
       return false
@@ -221,4 +251,60 @@ export function createVrmStage(
     clearCurrentVrm()
     stageScene.dispose()
   }
+}
+
+function isVisibleHitTestIntersection(
+  intersection: THREE.Intersection,
+  root: THREE.Object3D
+): boolean {
+  if (!isObjectHierarchyVisible(intersection.object, root)) {
+    return false
+  }
+
+  const maybeMesh = intersection.object as THREE.Object3D & {
+    material?: THREE.Material | THREE.Material[]
+  }
+
+  if (!maybeMesh.material) {
+    return true
+  }
+
+  if (!Array.isArray(maybeMesh.material)) {
+    return isVisibleHitTestMaterial(maybeMesh.material)
+  }
+
+  const materialIndex = intersection.face?.materialIndex
+  const hitMaterial =
+    typeof materialIndex === 'number' ? maybeMesh.material[materialIndex] : null
+
+  if (hitMaterial) {
+    return isVisibleHitTestMaterial(hitMaterial)
+  }
+
+  return maybeMesh.material.some(isVisibleHitTestMaterial)
+}
+
+function isObjectHierarchyVisible(
+  object: THREE.Object3D,
+  root: THREE.Object3D
+): boolean {
+  let current: THREE.Object3D | null = object
+
+  while (current) {
+    if (!current.visible) {
+      return false
+    }
+
+    if (current === root) {
+      return true
+    }
+
+    current = current.parent
+  }
+
+  return false
+}
+
+function isVisibleHitTestMaterial(material: THREE.Material): boolean {
+  return material.visible && material.opacity > 0.02 && material.colorWrite !== false
 }

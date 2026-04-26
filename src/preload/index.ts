@@ -1,118 +1,99 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type {
-  AssistantActionExecutionRequest,
-  AssistantActionExecutionResponse,
-  AssistantCommandRequest,
-  AssistantCommandResponse,
-  AssistantEvent,
-  AssistantMessage,
-  AssistantRuntimeStatus,
-  CancelWorkflowRunRequest,
-  CancelWorkflowRunResponse,
-  BonziWorkflowRunSnapshot,
-  ElizaPluginDiscoveryRequest,
-  ElizaPluginInstallRequest,
-  RespondWorkflowApprovalRequest,
-  RespondWorkflowApprovalResponse,
-  ElizaPluginOperationResult,
-  ElizaPluginSettings,
-  ElizaPluginUninstallRequest,
-  RuntimeApprovalSettings,
-  UpdateElizaPluginSettingsRequest,
-  UpdateRuntimeApprovalSettingsRequest,
-  ShellState
-} from '../shared/contracts'
+import {
+  IPC_CHANNELS,
+  type BonziBridge,
+  type IpcInvokeArgs,
+  type IpcInvokeChannel,
+  type IpcInvokeResponse,
+  type IpcRendererEventArgs,
+  type IpcRendererEventChannel,
+  type IpcSendArgs,
+  type IpcSendChannel
+} from '../shared/ipc-contracts'
+
+function invoke<Channel extends IpcInvokeChannel>(
+  channel: Channel,
+  ...args: IpcInvokeArgs<Channel>
+): Promise<IpcInvokeResponse<Channel>> {
+  return ipcRenderer.invoke(channel, ...args) as Promise<IpcInvokeResponse<Channel>>
+}
+
+function send<Channel extends IpcSendChannel>(
+  channel: Channel,
+  ...args: IpcSendArgs<Channel>
+): void {
+  ipcRenderer.send(channel, ...args)
+}
+
+function onRendererEvent<Channel extends IpcRendererEventChannel>(
+  channel: Channel,
+  listener: (...args: IpcRendererEventArgs<Channel>) => void
+): (() => void) {
+  const handler = (
+    _event: Electron.IpcRendererEvent,
+    ...args: IpcRendererEventArgs<Channel>
+  ): void => {
+    listener(...args)
+  }
+
+  ipcRenderer.on(
+    channel,
+    handler as (event: Electron.IpcRendererEvent, ...args: unknown[]) => void
+  )
+
+  return (): void => {
+    ipcRenderer.off(
+      channel,
+      handler as (event: Electron.IpcRendererEvent, ...args: unknown[]) => void
+    )
+  }
+}
 
 const bonziApi = {
   app: {
-    getShellState: (): Promise<ShellState> =>
-      ipcRenderer.invoke('app:get-shell-state')
+    getShellState: () => invoke(IPC_CHANNELS.app.getShellState)
   },
   settings: {
-    getElizaPlugins: (): Promise<ElizaPluginSettings> =>
-      ipcRenderer.invoke('settings:get-eliza-plugins'),
-    updateElizaPlugins: (
-      request: UpdateElizaPluginSettingsRequest
-    ): Promise<ElizaPluginSettings> =>
-      ipcRenderer.invoke('settings:update-eliza-plugins', request),
-    getRuntimeApprovalSettings: (): Promise<RuntimeApprovalSettings> =>
-      ipcRenderer.invoke('settings:get-runtime-approval-settings'),
-    updateRuntimeApprovalSettings: (
-      request: UpdateRuntimeApprovalSettingsRequest
-    ): Promise<RuntimeApprovalSettings> =>
-      ipcRenderer.invoke('settings:update-runtime-approval-settings', request)
+    getElizaPlugins: () => invoke(IPC_CHANNELS.settings.getElizaPlugins),
+    updateElizaPlugins: (request) =>
+      invoke(IPC_CHANNELS.settings.updateElizaPlugins, request),
+    getRuntimeApprovalSettings: () =>
+      invoke(IPC_CHANNELS.settings.getRuntimeApprovalSettings),
+    updateRuntimeApprovalSettings: (request) =>
+      invoke(IPC_CHANNELS.settings.updateRuntimeApprovalSettings, request)
   },
   plugins: {
-    discover: (
-      request?: ElizaPluginDiscoveryRequest
-    ): Promise<ElizaPluginSettings> =>
-      ipcRenderer.invoke('plugins:discover', request),
-    install: (
-      request: ElizaPluginInstallRequest
-    ): Promise<ElizaPluginOperationResult> =>
-      ipcRenderer.invoke('plugins:install', request),
-    uninstall: (
-      request: ElizaPluginUninstallRequest
-    ): Promise<ElizaPluginOperationResult> =>
-      ipcRenderer.invoke('plugins:uninstall', request)
+    discover: (request) => invoke(IPC_CHANNELS.plugins.discover, request),
+    install: (request) => invoke(IPC_CHANNELS.plugins.install, request),
+    uninstall: (request) => invoke(IPC_CHANNELS.plugins.uninstall, request)
   },
   window: {
-    getBounds: (): Promise<{
-      x: number
-      y: number
-      width: number
-      height: number
-    } | null> => ipcRenderer.invoke('window:get-bounds'),
-    minimize: (): void => ipcRenderer.send('window:minimize'),
-    close: (): void => ipcRenderer.send('window:close'),
-    setPosition: (x: number, y: number): void =>
-      ipcRenderer.send('window:set-position', x, y),
-    setBounds: (bounds: {
-      x: number
-      y: number
-      width: number
-      height: number
-    }): void => ipcRenderer.send('window:set-bounds', bounds)
+    getBounds: () => invoke(IPC_CHANNELS.window.getBounds),
+    minimize: () => send(IPC_CHANNELS.window.minimize),
+    close: () => send(IPC_CHANNELS.window.close),
+    setPosition: (x, y) => send(IPC_CHANNELS.window.setPosition, x, y),
+    setBounds: (bounds) => send(IPC_CHANNELS.window.setBounds, bounds),
+    setMouseEventsIgnored: (ignored) =>
+      send(IPC_CHANNELS.window.setMouseEventsIgnored, ignored)
   },
   assistant: {
-    sendCommand: (
-      request: AssistantCommandRequest
-    ): Promise<AssistantCommandResponse> =>
-      ipcRenderer.invoke('assistant:send-command', request),
-    executeAction: (
-      request: AssistantActionExecutionRequest
-    ): Promise<AssistantActionExecutionResponse> =>
-      ipcRenderer.invoke('assistant:execute-action', request),
-    getHistory: (): Promise<AssistantMessage[]> =>
-      ipcRenderer.invoke('assistant:get-history'),
-    resetConversation: (): Promise<void> =>
-      ipcRenderer.invoke('assistant:reset-conversation'),
-    reloadRuntime: (): Promise<AssistantRuntimeStatus> =>
-      ipcRenderer.invoke('assistant:reload-runtime'),
-    getWorkflowRuns: (): Promise<BonziWorkflowRunSnapshot[]> =>
-      ipcRenderer.invoke('assistant:get-workflow-runs'),
-    getWorkflowRun: (id: string): Promise<BonziWorkflowRunSnapshot | null> =>
-      ipcRenderer.invoke('assistant:get-workflow-run', id),
-    respondWorkflowApproval: (
-      request: RespondWorkflowApprovalRequest
-    ): Promise<RespondWorkflowApprovalResponse> =>
-      ipcRenderer.invoke('assistant:respond-workflow-approval', request),
-    cancelWorkflowRun: (
-      request: CancelWorkflowRunRequest
-    ): Promise<CancelWorkflowRunResponse> =>
-      ipcRenderer.invoke('assistant:cancel-workflow', request),
-    onEvent: (listener: (event: AssistantEvent) => void): (() => void) => {
-      const handler = (_event: Electron.IpcRendererEvent, event: AssistantEvent) => {
-        listener(event)
-      }
-
-      ipcRenderer.on('assistant:event', handler)
-
-      return (): void => {
-        ipcRenderer.off('assistant:event', handler)
-      }
-    }
+    sendCommand: (request) =>
+      invoke(IPC_CHANNELS.assistant.sendCommand, request),
+    executeAction: (request) =>
+      invoke(IPC_CHANNELS.assistant.executeAction, request),
+    getHistory: () => invoke(IPC_CHANNELS.assistant.getHistory),
+    resetConversation: () =>
+      invoke(IPC_CHANNELS.assistant.resetConversation),
+    reloadRuntime: () => invoke(IPC_CHANNELS.assistant.reloadRuntime),
+    getWorkflowRuns: () => invoke(IPC_CHANNELS.assistant.getWorkflowRuns),
+    getWorkflowRun: (id) => invoke(IPC_CHANNELS.assistant.getWorkflowRun, id),
+    respondWorkflowApproval: (request) =>
+      invoke(IPC_CHANNELS.assistant.respondWorkflowApproval, request),
+    cancelWorkflowRun: (request) =>
+      invoke(IPC_CHANNELS.assistant.cancelWorkflow, request),
+    onEvent: (listener) =>
+      onRendererEvent(IPC_CHANNELS.assistant.event, listener)
   }
-}
+} satisfies BonziBridge
 
 contextBridge.exposeInMainWorld('bonzi', bonziApi)

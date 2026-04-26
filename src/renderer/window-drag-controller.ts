@@ -15,9 +15,11 @@ export interface WindowDragController {
 }
 
 export function createWindowDragController(options: {
+  canStartDrag?: (event: PointerEvent) => boolean
+  onDragStateChange?: (dragging: boolean) => void
   stageShellEl: HTMLElement
 }): WindowDragController {
-  const { stageShellEl } = options
+  const { canStartDrag, onDragStateChange, stageShellEl } = options
   let dragState: WindowDragState | null = null
 
   const handlePointerDown = async (event: PointerEvent): Promise<void> => {
@@ -33,6 +35,10 @@ export function createWindowDragController(options: {
       event.target instanceof HTMLElement &&
       (event.target.closest('.speech-bubble') || event.target.closest('.command-dock'))
     ) {
+      return
+    }
+
+    if (canStartDrag && !canStartDrag(event)) {
       return
     }
 
@@ -55,6 +61,7 @@ export function createWindowDragController(options: {
     }
 
     stageShellEl.setPointerCapture(event.pointerId)
+    onDragStateChange?.(true)
   }
 
   const handlePointerMove = (event: PointerEvent): void => {
@@ -81,6 +88,7 @@ export function createWindowDragController(options: {
     }
 
     dragState = null
+    onDragStateChange?.(false)
   }
 
   stageShellEl.addEventListener('pointerdown', handlePointerDown)
@@ -90,6 +98,11 @@ export function createWindowDragController(options: {
 
   return {
     dispose: () => {
+      if (dragState) {
+        onDragStateChange?.(false)
+        dragState = null
+      }
+
       stageShellEl.removeEventListener('pointerdown', handlePointerDown)
       stageShellEl.removeEventListener('pointermove', handlePointerMove)
       stageShellEl.removeEventListener('pointerup', clearDragState)

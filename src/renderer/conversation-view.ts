@@ -77,6 +77,12 @@ function getCurrentWorkflowStep(
   return run.steps.at(-1) ?? null
 }
 
+function shouldRenderWorkflowRun(
+  run: BonziWorkflowRunSnapshot | undefined
+): run is BonziWorkflowRunSnapshot {
+  return Boolean(run && run.steps.length > 0)
+}
+
 function renderWorkflowSummary(
   run: BonziWorkflowRunSnapshot,
   options: { approvalsEnabled: boolean }
@@ -220,7 +226,8 @@ export function getActiveConversationEntry(
       (action) => action.status !== 'completed' && action.status !== 'failed'
     )
     const hasActiveWorkflowRun =
-      entry.workflowRun && !isTerminalWorkflowRunStatus(entry.workflowRun.status)
+      shouldRenderWorkflowRun(entry.workflowRun) &&
+      !isTerminalWorkflowRunStatus(entry.workflowRun.status)
 
     if (hasPendingActions || entry.warnings.length > 0 || hasActiveWorkflowRun) {
       return entry
@@ -246,7 +253,8 @@ export function hasPendingBubbleActions(
 
   const hasPendingActions = entry.actions.some((action) => action.status !== 'completed')
   const hasActiveWorkflowRun =
-    entry.workflowRun && !isTerminalWorkflowRunStatus(entry.workflowRun.status)
+    shouldRenderWorkflowRun(entry.workflowRun) &&
+    !isTerminalWorkflowRunStatus(entry.workflowRun.status)
 
   return hasPendingActions || Boolean(hasActiveWorkflowRun)
 }
@@ -339,7 +347,7 @@ export function renderConversation(
     )
     .join('')
 
-  const workflowMarkup = workflowRun
+  const workflowMarkup = shouldRenderWorkflowRun(workflowRun)
     ? renderWorkflowRun(workflowRun, {
         approvalsEnabled: options.approvalsEnabled
       })

@@ -62,19 +62,17 @@ p {
 }
 
 .shell--ui-hidden .titlebar__brand,
+.shell--ui-hidden [data-action='settings'],
 .shell--ui-hidden [data-action='minimize'],
 .shell--ui-hidden [data-action='close'] {
   opacity: 0;
   pointer-events: none;
 }
 
-.shell--ui-hidden [data-action='settings'] {
-  pointer-events: auto;
-}
-
 .shell--settings-open .titlebar,
 .shell--settings-open .command-dock,
 .shell--settings-open .titlebar__brand,
+.shell--settings-open [data-action='settings'],
 .shell--settings-open [data-action='minimize'],
 .shell--settings-open [data-action='close'] {
   opacity: 1;
@@ -88,7 +86,8 @@ p {
 
 .shell--bubble-visible .speech-bubble-shell {
   opacity: 1;
-  pointer-events: auto;
+  /* Keep transparent bubble-shell space from stealing drag starts from the VRM stage. */
+  pointer-events: none;
 }
 
 .shell--ui-hidden.shell--bubble-visible .speech-bubble-shell {

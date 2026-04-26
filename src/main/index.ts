@@ -6,6 +6,7 @@ import {
 import { registerIpcHandlers } from './ipc'
 import { buildShellState } from './shell-state'
 import { createCompanionWindow } from './window'
+import { IPC_CHANNELS } from '../shared/ipc-contracts'
 
 if (process.env.BONZI_USER_DATA_DIR?.trim()) {
   app.setPath('userData', process.env.BONZI_USER_DATA_DIR)
@@ -54,7 +55,7 @@ app.whenReady().then(() => {
       return
     }
 
-    companionWindow.webContents.send('assistant:event', event)
+    companionWindow.webContents.send(IPC_CHANNELS.assistant.event, event)
   })
 
   registerIpcHandlers({

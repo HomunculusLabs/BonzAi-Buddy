@@ -1,19 +1,21 @@
-import { BrowserWindow, ipcMain, screen } from 'electron'
+import {
+  BrowserWindow,
+  ipcMain,
+  screen,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent
+} from 'electron'
 import type { AssistantService } from './assistant'
 import { buildShellState } from './shell-state'
-import type {
-  AssistantActionExecutionRequest,
-  AssistantCommandRequest,
-  AssistantMessage,
-  CancelWorkflowRunRequest,
-  ElizaPluginDiscoveryRequest,
-  ElizaPluginInstallRequest,
-  ElizaPluginUninstallRequest,
-  RespondWorkflowApprovalRequest,
-  ShellState,
-  UpdateElizaPluginSettingsRequest,
-  UpdateRuntimeApprovalSettingsRequest
-} from '../shared/contracts'
+import {
+  IPC_CHANNELS,
+  type IpcInvokeArgs,
+  type IpcInvokeChannel,
+  type IpcInvokeResponse,
+  type IpcSendArgs,
+  type IpcSendChannel,
+  type WindowBounds
+} from '../shared/ipc-contracts'
 
 interface RegisterIpcHandlersOptions {
   assistantService: AssistantService
@@ -21,12 +23,30 @@ interface RegisterIpcHandlersOptions {
 
 let handlersRegistered = false
 
-function areFiniteBounds(bounds: {
-  x: number
-  y: number
-  width: number
-  height: number
-}): boolean {
+function handleInvoke<Channel extends IpcInvokeChannel>(
+  channel: Channel,
+  listener: (
+    event: IpcMainInvokeEvent,
+    ...args: IpcInvokeArgs<Channel>
+  ) => IpcInvokeResponse<Channel> | Promise<IpcInvokeResponse<Channel>>
+): void {
+  ipcMain.handle(
+    channel,
+    listener as (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
+  )
+}
+
+function onSend<Channel extends IpcSendChannel>(
+  channel: Channel,
+  listener: (event: IpcMainEvent, ...args: IpcSendArgs<Channel>) => void
+): void {
+  ipcMain.on(
+    channel,
+    listener as (event: IpcMainEvent, ...args: unknown[]) => void
+  )
+}
+
+function areFiniteBounds(bounds: WindowBounds): boolean {
   return (
     Number.isFinite(bounds.x) &&
     Number.isFinite(bounds.y) &&
@@ -45,7 +65,7 @@ export function registerIpcHandlers(
   handlersRegistered = true
   const { assistantService } = options
 
-  ipcMain.handle('app:get-shell-state', (): ShellState => {
+  handleInvoke(IPC_CHANNELS.app.getShellState, () => {
     return buildShellState(
       assistantService.getProviderInfo(),
       assistantService.getStartupWarnings(),
@@ -55,140 +75,114 @@ export function registerIpcHandlers(
     )
   })
 
-  ipcMain.handle('settings:get-eliza-plugins', () => {
+  handleInvoke(IPC_CHANNELS.settings.getElizaPlugins, () => {
     return assistantService.getPluginSettings()
   })
 
-  ipcMain.handle(
-    'plugins:discover',
-    async (_event, request?: ElizaPluginDiscoveryRequest) => {
-      return assistantService.discoverPlugins(request)
-    }
-  )
+  handleInvoke(IPC_CHANNELS.plugins.discover, async (_event, request) => {
+    return assistantService.discoverPlugins(request)
+  })
 
-  ipcMain.handle(
-    'settings:update-eliza-plugins',
-    async (_event, request: UpdateElizaPluginSettingsRequest) => {
+  handleInvoke(
+    IPC_CHANNELS.settings.updateElizaPlugins,
+    async (_event, request) => {
       return assistantService.updatePluginSettings(request)
     }
   )
 
-  ipcMain.handle('settings:get-runtime-approval-settings', () => {
+  handleInvoke(IPC_CHANNELS.settings.getRuntimeApprovalSettings, () => {
     return assistantService.getRuntimeApprovalSettings()
   })
 
-  ipcMain.handle(
-    'settings:update-runtime-approval-settings',
-    async (_event, request: UpdateRuntimeApprovalSettingsRequest) => {
+  handleInvoke(
+    IPC_CHANNELS.settings.updateRuntimeApprovalSettings,
+    async (_event, request) => {
       return assistantService.updateRuntimeApprovalSettings(request)
     }
   )
 
-  ipcMain.handle(
-    'plugins:install',
-    async (_event, request: ElizaPluginInstallRequest) => {
-      return assistantService.installPlugin(request)
-    }
-  )
+  handleInvoke(IPC_CHANNELS.plugins.install, async (_event, request) => {
+    return assistantService.installPlugin(request)
+  })
 
-  ipcMain.handle(
-    'plugins:uninstall',
-    async (_event, request: ElizaPluginUninstallRequest) => {
-      return assistantService.uninstallPlugin(request)
-    }
-  )
+  handleInvoke(IPC_CHANNELS.plugins.uninstall, async (_event, request) => {
+    return assistantService.uninstallPlugin(request)
+  })
 
-  ipcMain.on('window:minimize', (event) => {
+  onSend(IPC_CHANNELS.window.minimize, (event) => {
     BrowserWindow.fromWebContents(event.sender)?.minimize()
   })
 
-  ipcMain.on('window:close', (event) => {
+  onSend(IPC_CHANNELS.window.close, (event) => {
     BrowserWindow.fromWebContents(event.sender)?.close()
   })
 
-  ipcMain.handle('window:get-bounds', (event) => {
+  handleInvoke(IPC_CHANNELS.window.getBounds, (event) => {
     return BrowserWindow.fromWebContents(event.sender)?.getBounds() ?? null
   })
 
-  ipcMain.on('window:set-position', (event, x: number, y: number) => {
+  onSend(IPC_CHANNELS.window.setPosition, (event, x, y) => {
     BrowserWindow.fromWebContents(event.sender)?.setPosition(
       Math.round(x),
       Math.round(y)
     )
   })
 
-  ipcMain.on(
-    'window:set-bounds',
-    (
-      event,
-      bounds: {
-        x: number
-        y: number
-        width: number
-        height: number
-      }
-    ) => {
-      const targetWindow = BrowserWindow.fromWebContents(event.sender)
+  onSend(IPC_CHANNELS.window.setMouseEventsIgnored, (event, ignored) => {
+    BrowserWindow.fromWebContents(event.sender)?.setIgnoreMouseEvents(ignored, {
+      forward: ignored
+    })
+  })
 
-      if (!targetWindow || !areFiniteBounds(bounds)) {
-        return
-      }
+  onSend(IPC_CHANNELS.window.setBounds, (event, bounds) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender)
 
-      const currentBounds = targetWindow.getBounds()
-      const display = screen.getDisplayMatching(currentBounds)
-      const { workArea } = display
-      const width = Math.max(320, Math.round(bounds.width))
-      const height = Math.min(
-        workArea.height,
-        Math.max(480, Math.round(bounds.height))
-      )
-      const x = Math.round(bounds.x)
-      const y = Math.max(
-        workArea.y,
-        Math.min(Math.round(bounds.y), workArea.y + workArea.height - height)
-      )
-
-      targetWindow.setBounds({ x, y, width, height })
+    if (!targetWindow || !areFiniteBounds(bounds)) {
+      return
     }
-  )
 
-  ipcMain.handle(
-    'assistant:send-command',
-    async (
-      _event,
-      request: AssistantCommandRequest
-    ) => {
-      return assistantService.sendCommand(request)
-    }
-  )
+    const currentBounds = targetWindow.getBounds()
+    const display = screen.getDisplayMatching(currentBounds)
+    const { workArea } = display
+    const width = Math.max(320, Math.round(bounds.width))
+    const height = Math.min(
+      workArea.height,
+      Math.max(480, Math.round(bounds.height))
+    )
+    const x = Math.round(bounds.x)
+    const y = Math.max(
+      workArea.y,
+      Math.min(Math.round(bounds.y), workArea.y + workArea.height - height)
+    )
 
-  ipcMain.handle(
-    'assistant:execute-action',
-    async (
-      _event,
-      request: AssistantActionExecutionRequest
-    ) => {
-      return assistantService.executeAction(request)
-    }
-  )
+    targetWindow.setBounds({ x, y, width, height })
+  })
 
-  ipcMain.handle('assistant:get-history', async (): Promise<AssistantMessage[]> => {
+  handleInvoke(IPC_CHANNELS.assistant.sendCommand, async (_event, request) => {
+    return assistantService.sendCommand(request)
+  })
+
+  handleInvoke(IPC_CHANNELS.assistant.executeAction, async (_event, request) => {
+    return assistantService.executeAction(request)
+  })
+
+  handleInvoke(IPC_CHANNELS.assistant.getHistory, async () => {
     return assistantService.getHistory()
   })
 
-  ipcMain.handle('assistant:reset-conversation', async (): Promise<void> => {
+  handleInvoke(IPC_CHANNELS.assistant.resetConversation, async () => {
     await assistantService.resetConversation()
   })
 
-  ipcMain.handle('assistant:reload-runtime', async () => {
+  handleInvoke(IPC_CHANNELS.assistant.reloadRuntime, async () => {
     return assistantService.reloadRuntime()
   })
 
-  ipcMain.handle('assistant:get-workflow-runs', () => {
+  handleInvoke(IPC_CHANNELS.assistant.getWorkflowRuns, () => {
     return assistantService.getWorkflowRuns()
   })
 
-  ipcMain.handle('assistant:get-workflow-run', (_event, id: string) => {
+  handleInvoke(IPC_CHANNELS.assistant.getWorkflowRun, (_event, id) => {
     if (typeof id !== 'string' || !id.trim()) {
       return null
     }
@@ -196,17 +190,14 @@ export function registerIpcHandlers(
     return assistantService.getWorkflowRun(id)
   })
 
-  ipcMain.handle(
-    'assistant:respond-workflow-approval',
-    async (_event, request: RespondWorkflowApprovalRequest) => {
+  handleInvoke(
+    IPC_CHANNELS.assistant.respondWorkflowApproval,
+    async (_event, request) => {
       return assistantService.respondWorkflowApproval(request)
     }
   )
 
-  ipcMain.handle(
-    'assistant:cancel-workflow',
-    async (_event, request: CancelWorkflowRunRequest) => {
-      return assistantService.cancelWorkflowRun(request)
-    }
-  )
+  handleInvoke(IPC_CHANNELS.assistant.cancelWorkflow, async (_event, request) => {
+    return assistantService.cancelWorkflowRun(request)
+  })
 }
