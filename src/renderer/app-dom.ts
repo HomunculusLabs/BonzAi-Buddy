@@ -72,7 +72,12 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
               aria-controls="settings-pane-general"
               aria-selected="true"
             >
-              <span class="settings-panel__tab-icon" aria-hidden="true">⚙️</span>
+              <span class="settings-panel__tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" />
+                  <path d="M19.4 13.5c.1-.5.1-1 .1-1.5s0-1-.1-1.5l2-1.5-2-3.5-2.4 1a8 8 0 0 0-2.6-1.5L14 2.5h-4L9.6 5a8 8 0 0 0-2.6 1.5l-2.4-1-2 3.5 2 1.5a9.7 9.7 0 0 0 0 3l-2 1.5 2 3.5 2.4-1a8 8 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a8 8 0 0 0 2.6-1.5l2.4 1 2-3.5-2-1.5Z" />
+                </svg>
+              </span>
               <span class="settings-panel__tab-copy">
                 <span class="settings-panel__tab-label">General</span>
                 <small>Buddy</small>
@@ -88,7 +93,12 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
               aria-selected="false"
               tabindex="-1"
             >
-              <span class="settings-panel__tab-icon" aria-hidden="true">🛡️</span>
+              <span class="settings-panel__tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M12 2.5 5 5.1v5.6c0 4.7 2.9 8.9 7 10.8 4.1-1.9 7-6.1 7-10.8V5.1l-7-2.6Z" />
+                  <path d="M9.3 12.1 11 13.8l3.9-4.1" class="settings-panel__tab-icon-cutout" />
+                </svg>
+              </span>
               <span class="settings-panel__tab-copy">
                 <span class="settings-panel__tab-label">Approvals</span>
                 <small>Autonomy</small>
@@ -104,7 +114,13 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
               aria-selected="false"
               tabindex="-1"
             >
-              <span class="settings-panel__tab-icon" aria-hidden="true">🎭</span>
+              <span class="settings-panel__tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M5 4.7c2.6-.8 5-.8 7 0v6.8c0 3-1.8 5.5-5 7.1-3.2-1.6-5-4.1-5-7.1V4.7Z" />
+                  <path d="M12 4.7c2-.8 4.4-.8 7 0v6.8c0 3-1.8 5.5-5 7.1a8.4 8.4 0 0 1-2.8-2.2c.5-1.1.8-2.3.8-3.6V4.7Z" opacity="0.62" />
+                  <path d="M5.5 9.3h.1M8.4 9.3h.1M4.9 13.3c1.2.8 2.8.8 4 0M15.5 9.3h.1M18.4 9.3h.1M15 13.6c1.1-.7 2.4-.7 3.5 0" class="settings-panel__tab-icon-cutout" />
+                </svg>
+              </span>
               <span class="settings-panel__tab-copy">
                 <span class="settings-panel__tab-label">Character</span>
                 <small>Eliza JSON</small>
@@ -120,7 +136,12 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
               aria-selected="false"
               tabindex="-1"
             >
-              <span class="settings-panel__tab-icon" aria-hidden="true">🧩</span>
+              <span class="settings-panel__tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M9 3h6v4.1a2.2 2.2 0 1 1 0 3.8V21H9v-4.1a2.2 2.2 0 1 1 0-3.8V3Z" />
+                  <path d="M3 9h4.1a2.2 2.2 0 1 0 3.8 0H21v6h-4.1a2.2 2.2 0 1 1-3.8 0H3V9Z" opacity="0.72" />
+                </svg>
+              </span>
               <span class="settings-panel__tab-copy">
                 <span class="settings-panel__tab-label">Plugins</span>
                 <small>Runtime</small>

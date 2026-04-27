@@ -323,7 +323,21 @@ p {
   height: 30px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.07);
-  font-size: 1rem;
+  color: currentColor;
+}
+
+.settings-panel__tab-icon svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+}
+
+.settings-panel__tab-icon-cutout {
+  fill: none;
+  stroke: rgba(8, 11, 22, 0.86);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .settings-panel__tab-copy {
