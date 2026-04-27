@@ -15,9 +15,15 @@ import { createShellStateController } from './shell-state-controller'
 import { createVrmController } from './vrm-controller'
 import { createWindowDragController } from './window-drag-controller'
 
+const POST_BUBBLE_PASSTHROUGH_SUPPRESSION_MS = 1500
+const RENDERER_MOUSE_IGNORE_LEASE_MS = 250
+
 export function renderApp(root: HTMLDivElement): void {
-  const disableVrm =
-    new URLSearchParams(window.location.search).get('bonziDisableVrm') === '1'
+  const searchParams = new URLSearchParams(window.location.search)
+  const disableVrm = searchParams.get('bonziDisableVrm') === '1'
+  const bubbleExpiryMs = parseOptionalNonNegativeNumber(
+    searchParams.get('bonziBubbleExpiryMs')
+  )
 
   const elements = mountAppDom(root)
   const {
@@ -46,24 +52,40 @@ export function renderApp(root: HTMLDivElement): void {
   let hasVrmError = false
   let isWindowDragging = false
   let areMouseEventsIgnored: boolean | null = null
+  let mouseIgnoreLeaseTimer: number | null = null
+  let mouseIgnoreLeaseId = 0
+  let mousePassthroughSuppressedUntilMs = 0
   let settingsPanelController: SettingsPanelController
   let conversationController: ConversationController
 
   const bubbleWindowLayout = createBubbleWindowLayoutController({
+    bubbleExpiryMs,
     chatLogEl,
+    onShellBubbleVisibilityChange: (visible) => {
+      if (visible) {
+        forceMouseEventsEnabled()
+        return
+      }
+
+      suppressMousePassthrough(POST_BUBBLE_PASSTHROUGH_SUPPRESSION_MS)
+    },
     shellEl
   })
 
   const syncBubbleWindowLayout = (): void => {
+    const isUiVisible = conversationController.isUiVisible()
+
+    settingsButton.hidden = !isUiVisible
+
     bubbleWindowLayout.sync({
       entries: conversationController.getEntries(),
-      isUiVisible: conversationController.isUiVisible(),
+      isUiVisible,
       isAwaitingAssistant: conversationController.isAwaitingAssistant(),
       hasVrmError
     })
 
-    if (conversationController.isUiVisible() || hasVrmError) {
-      setMouseEventsIgnored(false)
+    if (isUiVisible || hasVrmError) {
+      forceMouseEventsEnabled()
     }
   }
 
@@ -130,7 +152,14 @@ export function renderApp(root: HTMLDivElement): void {
     shellStateController
   })
 
-  const setMouseEventsIgnored = (ignored: boolean): void => {
+  function clearMouseIgnoreLeaseTimer(): void {
+    if (mouseIgnoreLeaseTimer !== null) {
+      window.clearTimeout(mouseIgnoreLeaseTimer)
+      mouseIgnoreLeaseTimer = null
+    }
+  }
+
+  function setMouseEventsIgnored(ignored: boolean): void {
     if (areMouseEventsIgnored === ignored || !window.bonzi) {
       return
     }
@@ -139,7 +168,44 @@ export function renderApp(root: HTMLDivElement): void {
     window.bonzi.window.setMouseEventsIgnored(ignored)
   }
 
-  const canInteractWithStageFromEvent = (event: MouseEvent): boolean => {
+  function forceMouseEventsEnabled(): void {
+    mouseIgnoreLeaseId += 1
+    clearMouseIgnoreLeaseTimer()
+    setMouseEventsIgnored(false)
+  }
+
+  function isMousePassthroughSuppressed(): boolean {
+    return window.performance.now() < mousePassthroughSuppressedUntilMs
+  }
+
+  function suppressMousePassthrough(durationMs: number): void {
+    mousePassthroughSuppressedUntilMs = Math.max(
+      mousePassthroughSuppressedUntilMs,
+      window.performance.now() + durationMs
+    )
+    forceMouseEventsEnabled()
+  }
+
+  function requestMouseIgnoreLease(): void {
+    if (isMousePassthroughSuppressed()) {
+      forceMouseEventsEnabled()
+      return
+    }
+
+    const leaseId = ++mouseIgnoreLeaseId
+    setMouseEventsIgnored(true)
+    clearMouseIgnoreLeaseTimer()
+    mouseIgnoreLeaseTimer = window.setTimeout(() => {
+      if (leaseId !== mouseIgnoreLeaseId) {
+        return
+      }
+
+      mouseIgnoreLeaseTimer = null
+      setMouseEventsIgnored(false)
+    }, RENDERER_MOUSE_IGNORE_LEASE_MS)
+  }
+
+  function canInteractWithStageFromEvent(event: MouseEvent): boolean {
     if (conversationController.isUiVisible() || vrmController.hasError()) {
       return true
     }
@@ -147,21 +213,27 @@ export function renderApp(root: HTMLDivElement): void {
     return vrmController.hitTestClientPoint(event.clientX, event.clientY) ?? true
   }
 
-  const isExplicitInteractiveTarget = (target: EventTarget | null): boolean => {
+  function isExplicitInteractiveTarget(target: EventTarget | null): boolean {
     return (
       target instanceof HTMLElement &&
       Boolean(target.closest('.speech-bubble, .command-dock, .settings-panel'))
     )
   }
 
-  const syncDesktopMouseEventMode = (event: MouseEvent): void => {
+  function syncDesktopMouseEventMode(event: MouseEvent): void {
     if (
       conversationController.isUiVisible() ||
       vrmController.hasError() ||
       isWindowDragging ||
+      shellEl.classList.contains('shell--bubble-visible') ||
       isExplicitInteractiveTarget(event.target)
     ) {
-      setMouseEventsIgnored(false)
+      forceMouseEventsEnabled()
+      return
+    }
+
+    if (isMousePassthroughSuppressed()) {
+      forceMouseEventsEnabled()
       return
     }
 
@@ -169,7 +241,13 @@ export function renderApp(root: HTMLDivElement): void {
       event.clientX,
       event.clientY
     )
-    setMouseEventsIgnored(hitTestResult === false)
+
+    if (hitTestResult === false) {
+      requestMouseIgnoreLease()
+      return
+    }
+
+    forceMouseEventsEnabled()
   }
 
   const windowDragController = createWindowDragController({
@@ -178,7 +256,7 @@ export function renderApp(root: HTMLDivElement): void {
       isWindowDragging = dragging
 
       if (dragging) {
-        setMouseEventsIgnored(false)
+        forceMouseEventsEnabled()
       }
     },
     stageShellEl
@@ -232,7 +310,14 @@ export function renderApp(root: HTMLDivElement): void {
     }
 
     event.preventDefault()
-    conversationController.setUiVisible(!conversationController.isUiVisible())
+
+    const nextUiVisible = !conversationController.isUiVisible()
+
+    if (!nextUiVisible) {
+      settingsPanelController.setVisible(false)
+    }
+
+    conversationController.setUiVisible(nextUiVisible)
   }
 
   const handleWindowKeydown = (event: KeyboardEvent): void => {
@@ -358,7 +443,7 @@ export function renderApp(root: HTMLDivElement): void {
       stageShellEl.removeEventListener('dblclick', handleStageDoubleClick)
       window.removeEventListener('keydown', handleWindowKeydown)
       window.removeEventListener('mousemove', handleWindowMouseMove)
-      setMouseEventsIgnored(false)
+      forceMouseEventsEnabled()
       vrmRetryButton.removeEventListener('click', handleVrmRetryClick)
       commandController.dispose()
       conversationController.dispose()
@@ -371,4 +456,14 @@ export function renderApp(root: HTMLDivElement): void {
   )
 
   syncBubbleWindowLayout()
+}
+
+function parseOptionalNonNegativeNumber(value: string | null): number | undefined {
+  if (value === null || value.trim() === '') {
+    return undefined
+  }
+
+  const parsed = Number(value)
+
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
 }

@@ -1,27 +1,37 @@
 import { app } from 'electron'
-import { accessSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { spawn } from 'node:child_process'
-import { constants } from 'node:fs'
-import { delimiter, isAbsolute, join } from 'node:path'
 import {
   ELIZA_REQUIRED_PLUGIN_IDS,
   type AssistantProviderInfo,
   type ElizaPluginInstallRequest,
   type ElizaPluginOperationResult,
   type ElizaPluginOperationSnapshot,
-  type ElizaPluginOperationStatus,
   type ElizaPluginSettings,
   type ElizaPluginUninstallRequest
 } from '../../shared/contracts'
-import { isRecord, normalizeError, normalizeOptionalString } from '../../shared/value-utils'
+import { normalizeError, normalizeOptionalString } from '../../shared/value-utils'
 import { BonziPluginDiscoveryService } from './plugin-discovery'
+import { PluginInstallConfirmationStore } from './plugin-install-confirmations'
+import { PluginOperationHistory } from './plugin-operation-history'
+import { runCommandWithBoundedOutput } from './plugin-command-runner'
+import {
+  buildAddCommandPreview,
+  normalizeInstallRequest,
+  normalizeUninstallRequest
+} from './plugin-installer-normalization'
+import type {
+  CommandRunResult,
+  PluginInstallerCommandRunner
+} from './plugin-installer-types'
+import {
+  ensureWorkspacePackageJson,
+  parsePositiveInteger,
+  resolveBunPath,
+  resolvePluginWorkspaceDir
+} from './plugin-installer-workspace'
 import { BonziPluginSettingsStore } from './plugin-settings'
 
-const DEFAULT_WORKSPACE_DIR_NAME = 'eliza-plugin-workspace'
 const DEFAULT_INSTALL_TIMEOUT_MS = 120_000
 const DEFAULT_OUTPUT_LIMIT_CHARS = 16_000
-const OPERATION_HISTORY_LIMIT = 24
-const INSTALL_CONFIRMATION_TTL_MS = 5 * 60 * 1000
 
 interface BonziPluginInstallationServiceOptions {
   settingsStore?: BonziPluginSettingsStore
@@ -29,36 +39,7 @@ interface BonziPluginInstallationServiceOptions {
   workspaceDir?: string
   userDataDir?: string
   env?: NodeJS.ProcessEnv
-  runCommand?: (options: {
-    command: string
-    args: string[]
-    cwd: string
-    timeoutMs: number
-    outputLimitChars: number
-  }) => Promise<CommandRunResult>
-}
-
-interface CommandRunResult {
-  stdout: string
-  stderr: string
-  exitCode: number | null
-  timedOut: boolean
-}
-
-interface NormalizedInstallRequest {
-  pluginId: string
-  packageName: string
-  versionRange?: string
-  registryRef?: string
-  confirmed: boolean
-  confirmationOperationId?: string
-  ignoreScripts: boolean
-}
-
-interface NormalizedUninstallRequest {
-  pluginId?: string
-  packageName?: string
-  confirmed: boolean
+  runCommand?: PluginInstallerCommandRunner
 }
 
 export class BonziPluginInstallationService {
@@ -66,15 +47,12 @@ export class BonziPluginInstallationService {
   private readonly discoveryService: BonziPluginDiscoveryService
   private readonly workspaceDir: string
   private readonly env: NodeJS.ProcessEnv
-  private readonly runCommand: NonNullable<BonziPluginInstallationServiceOptions['runCommand']>
+  private readonly runCommand: PluginInstallerCommandRunner
   private readonly installTimeoutMs: number
   private readonly outputLimitChars: number
   private lock: Promise<void> = Promise.resolve()
-  private readonly operationHistory: ElizaPluginOperationSnapshot[] = []
-  private readonly pendingInstallConfirmations = new Map<
-    string,
-    { request: NormalizedInstallRequest; expiresAt: number }
-  >()
+  private readonly operationHistory = new PluginOperationHistory()
+  private readonly installConfirmations = new PluginInstallConfirmationStore()
 
   constructor(options: BonziPluginInstallationServiceOptions = {}) {
     this.settingsStore = options.settingsStore ?? new BonziPluginSettingsStore()
@@ -121,10 +99,7 @@ export class BonziPluginInstallationService {
     this.recordOperationSnapshot(queuedSnapshot)
 
     if (!normalized.confirmed) {
-      this.pendingInstallConfirmations.set(operationId, {
-        request: normalized,
-        expiresAt: Date.now() + INSTALL_CONFIRMATION_TTL_MS
-      })
+      this.installConfirmations.preview(operationId, normalized)
 
       return this.buildOperationResult({
         provider,
@@ -136,7 +111,7 @@ export class BonziPluginInstallationService {
       })
     }
 
-    const confirmationError = this.validateInstallConfirmation(normalized)
+    const confirmationError = this.installConfirmations.validateAndConsume(normalized)
     if (confirmationError) {
       const failedSnapshot: ElizaPluginOperationSnapshot = {
         ...queuedSnapshot,
@@ -283,7 +258,7 @@ export class BonziPluginInstallationService {
       try {
         const persisted = this.settingsStore.getPersistedPluginInventorySnapshot()
         const pluginId =
-          normalizePluginId(normalized.pluginId) ??
+          normalized.pluginId ??
           (normalized.packageName
             ? this.settingsStore.findPluginIdByPackageName(normalized.packageName)
             : null)
@@ -320,7 +295,7 @@ export class BonziPluginInstallationService {
         const bunPath = resolveBunPath(this.env)
         ensureWorkspacePackageJson(this.workspaceDir)
 
-        const commandResult = await this.runCommand({
+        const commandResult: CommandRunResult = await this.runCommand({
           command: bunPath,
           args: ['remove', packageName],
           cwd: this.workspaceDir,
@@ -400,52 +375,8 @@ export class BonziPluginInstallationService {
     }
   }
 
-  private validateInstallConfirmation(request: NormalizedInstallRequest): string | null {
-    const confirmationId = normalizeOptionalString(request.confirmationOperationId)
-
-    if (!confirmationId) {
-      return 'Install confirmation requires confirmationOperationId from a prior preview operation.'
-    }
-
-    const pending = this.pendingInstallConfirmations.get(confirmationId)
-
-    if (!pending) {
-      return 'Install confirmation was not found or has already been used.'
-    }
-
-    this.pendingInstallConfirmations.delete(confirmationId)
-
-    if (pending.expiresAt < Date.now()) {
-      return 'Install confirmation expired. Preview the install again.'
-    }
-
-    if (
-      pending.request.pluginId !== request.pluginId ||
-      pending.request.packageName !== request.packageName ||
-      pending.request.versionRange !== request.versionRange ||
-      pending.request.registryRef !== request.registryRef
-    ) {
-      return 'Install confirmation does not match the previewed package request.'
-    }
-
-    return null
-  }
-
   private recordOperationSnapshot(snapshot: ElizaPluginOperationSnapshot): void {
-    const index = this.operationHistory.findIndex(
-      (operation) => operation.operationId === snapshot.operationId
-    )
-
-    if (index >= 0) {
-      this.operationHistory[index] = snapshot
-      return
-    }
-
-    this.operationHistory.unshift(snapshot)
-
-    if (this.operationHistory.length > OPERATION_HISTORY_LIMIT) {
-      this.operationHistory.length = OPERATION_HISTORY_LIMIT
-    }
+    this.operationHistory.record(snapshot)
   }
 
   private async buildOperationResult(options: {
@@ -464,255 +395,10 @@ export class BonziPluginInstallationService {
       operation: options.snapshot,
       settings: {
         ...discovered,
-        operations: [...this.operationHistory]
+        operations: this.operationHistory.list()
       }
     }
   }
 }
 
-function normalizeInstallRequest(request: ElizaPluginInstallRequest): NormalizedInstallRequest {
-  const packageName = normalizeOptionalString(request.packageName)
-
-  if (!packageName) {
-    throw new Error('Install request must include a packageName.')
-  }
-
-  return {
-    pluginId:
-      normalizePluginId(request.pluginId ?? request.id) ??
-      derivePluginIdFromPackageName(packageName),
-    packageName,
-    versionRange: normalizeOptionalString(request.versionRange),
-    registryRef: normalizeOptionalString(request.registryRef),
-    confirmed: request.confirmed === true,
-    confirmationOperationId: normalizeOptionalString(request.confirmationOperationId),
-    ignoreScripts: request.ignoreScripts !== false
-  }
-}
-
-function normalizeUninstallRequest(
-  request: ElizaPluginUninstallRequest
-): NormalizedUninstallRequest {
-  return {
-    pluginId: normalizePluginId(request.pluginId ?? request.id),
-    packageName: normalizeOptionalString(request.packageName),
-    confirmed: request.confirmed === true
-  }
-}
-
-function derivePluginIdFromPackageName(packageName: string): string {
-  const lastSegment = packageName.split('/').at(-1) ?? packageName
-  const stripped = lastSegment.replace(/^plugin-/, '').trim()
-
-  if (!stripped) {
-    throw new Error(`Could not derive plugin id from package name "${packageName}".`)
-  }
-
-  return stripped
-}
-
-function buildAddCommandPreview(request: NormalizedInstallRequest): string {
-  const spec = request.versionRange
-    ? `${request.packageName}@${request.versionRange}`
-    : request.packageName
-  const suffix = request.ignoreScripts ? ' --ignore-scripts' : ' --allow-scripts'
-  return `bun add ${spec}${suffix}`
-}
-
-function ensureWorkspacePackageJson(workspaceDir: string): void {
-  mkdirSync(workspaceDir, { recursive: true })
-  const packageJsonPath = join(workspaceDir, 'package.json')
-
-  if (!existsSync(packageJsonPath)) {
-    writeFileSync(
-      packageJsonPath,
-      JSON.stringify(
-        {
-          private: true,
-          type: 'module',
-          dependencies: {}
-        },
-        null,
-        2
-      )
-    )
-    return
-  }
-
-  let parsed: unknown
-
-  try {
-    parsed = JSON.parse(readFileSync(packageJsonPath, 'utf8'))
-  } catch {
-    throw new Error('Plugin workspace package.json exists but is not valid JSON.')
-  }
-
-  if (!isRecord(parsed)) {
-    throw new Error('Plugin workspace package.json must contain a JSON object.')
-  }
-
-  const dependencies = isRecord(parsed.dependencies) ? parsed.dependencies : {}
-  const normalized = {
-    ...parsed,
-    private: true,
-    type: 'module',
-    dependencies
-  }
-
-  writeFileSync(packageJsonPath, JSON.stringify(normalized, null, 2))
-}
-
-export function resolvePluginWorkspaceDir(options: {
-  env: NodeJS.ProcessEnv
-  explicit?: string
-  userDataDir: string
-}): string {
-  const fallback = join(options.userDataDir, DEFAULT_WORKSPACE_DIR_NAME)
-  const explicit = normalizeOptionalString(options.explicit)
-
-  if (explicit) {
-    return explicit
-  }
-
-  const envWorkspaceDir = normalizeOptionalString(options.env.BONZI_PLUGIN_WORKSPACE_DIR)
-
-  if (!envWorkspaceDir) {
-    return fallback
-  }
-
-  if (isAbsolute(envWorkspaceDir)) {
-    return envWorkspaceDir
-  }
-
-  return fallback
-}
-
-function resolveBunPath(env: NodeJS.ProcessEnv): string {
-  const explicitPath = normalizeOptionalString(env.BONZI_BUN_PATH)
-
-  if (explicitPath) {
-    assertExecutable(explicitPath, 'BONZI_BUN_PATH')
-    return explicitPath
-  }
-
-  const pathValue = normalizeOptionalString(env.PATH)
-
-  if (!pathValue) {
-    throw new Error(
-      'Could not locate Bun. Set BONZI_BUN_PATH or ensure bun is available on PATH.'
-    )
-  }
-
-  for (const segment of pathValue.split(delimiter)) {
-    const normalizedSegment = normalizeOptionalString(segment)
-    if (!normalizedSegment) {
-      continue
-    }
-
-    const candidate = join(normalizedSegment, 'bun')
-
-    if (!isExecutable(candidate)) {
-      continue
-    }
-
-    return candidate
-  }
-
-  throw new Error(
-    'Could not locate Bun. Set BONZI_BUN_PATH or ensure bun is available on PATH.'
-  )
-}
-
-function assertExecutable(path: string, envVarName: string): void {
-  if (!isExecutable(path)) {
-    throw new Error(`${envVarName} points to a non-executable path: ${path}`)
-  }
-}
-
-function isExecutable(path: string): boolean {
-  try {
-    accessSync(path, constants.X_OK)
-    return true
-  } catch {
-    return false
-  }
-}
-
-function parsePositiveInteger(value: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(value ?? '', 10)
-
-  if (Number.isFinite(parsed) && parsed > 0) {
-    return parsed
-  }
-
-  return fallback
-}
-
-function normalizePluginId(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined
-  }
-
-  const normalized = value.trim()
-  return normalized.length > 0 ? normalized : undefined
-}
-
-
-async function runCommandWithBoundedOutput(options: {
-  command: string
-  args: string[]
-  cwd: string
-  timeoutMs: number
-  outputLimitChars: number
-}): Promise<CommandRunResult> {
-  return new Promise<CommandRunResult>((resolve, reject) => {
-    const child = spawn(options.command, options.args, {
-      cwd: options.cwd,
-      env: process.env,
-      stdio: ['ignore', 'pipe', 'pipe']
-    })
-
-    let stdout = ''
-    let stderr = ''
-    let timedOut = false
-
-    const timeout = setTimeout(() => {
-      timedOut = true
-      child.kill('SIGTERM')
-      setTimeout(() => child.kill('SIGKILL'), 2_000).unref()
-    }, options.timeoutMs)
-
-    child.stdout.on('data', (chunk: Buffer | string) => {
-      stdout = appendBounded(stdout, chunk.toString(), options.outputLimitChars)
-    })
-
-    child.stderr.on('data', (chunk: Buffer | string) => {
-      stderr = appendBounded(stderr, chunk.toString(), options.outputLimitChars)
-    })
-
-    child.on('error', (error) => {
-      clearTimeout(timeout)
-      reject(error)
-    })
-
-    child.on('close', (code) => {
-      clearTimeout(timeout)
-      resolve({
-        stdout,
-        stderr,
-        exitCode: code,
-        timedOut
-      })
-    })
-  })
-}
-
-function appendBounded(current: string, addition: string, limit: number): string {
-  const combined = `${current}${addition}`
-
-  if (combined.length <= limit) {
-    return combined
-  }
-
-  return combined.slice(combined.length - limit)
-}
+export { resolvePluginWorkspaceDir }

@@ -5,22 +5,28 @@ import type {
   AssistantCommandResponse,
   AssistantEvent,
   AssistantMessage,
-  AssistantRuntimeStatus,
-  BonziWorkflowRunSnapshot,
-  CancelWorkflowRunRequest,
-  CancelWorkflowRunResponse,
+  AssistantRuntimeStatus
+} from './contracts/assistant'
+import type {
+  RuntimeApprovalSettings,
+  UpdateRuntimeApprovalSettingsRequest
+} from './contracts/approvals'
+import type {
   ElizaPluginDiscoveryRequest,
   ElizaPluginInstallRequest,
   ElizaPluginOperationResult,
   ElizaPluginSettings,
   ElizaPluginUninstallRequest,
+  UpdateElizaPluginSettingsRequest
+} from './contracts/plugins'
+import type { ShellState } from './contracts/shell'
+import type {
+  BonziWorkflowRunSnapshot,
+  CancelWorkflowRunRequest,
+  CancelWorkflowRunResponse,
   RespondWorkflowApprovalRequest,
-  RespondWorkflowApprovalResponse,
-  RuntimeApprovalSettings,
-  ShellState,
-  UpdateElizaPluginSettingsRequest,
-  UpdateRuntimeApprovalSettingsRequest
-} from './contracts'
+  RespondWorkflowApprovalResponse
+} from './contracts/workflow'
 
 export interface WindowBounds {
   x: number

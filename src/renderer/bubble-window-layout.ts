@@ -24,11 +24,15 @@ export interface BubbleWindowLayoutController {
 }
 
 export function createBubbleWindowLayoutController(options: {
+  bubbleExpiryMs?: number
   chatLogEl: HTMLElement
+  onShellBubbleVisibilityChange?: (visible: boolean) => void
   shellEl: HTMLElement
 }): BubbleWindowLayoutController {
   const { chatLogEl, shellEl } = options
+  const bubbleExpiryMs = options.bubbleExpiryMs ?? BUBBLE_EXPIRY_MS
   let isBubbleVisible = false
+  let lastShellBubbleVisible: boolean | null = null
   let bubbleExpiryTimer: number | null = null
   let bubbleResizeFrame: number | null = null
   let lastArgs: BubbleWindowLayoutSyncArgs = {
@@ -46,15 +50,20 @@ export function createBubbleWindowLayoutController(options: {
   }
 
   const syncUiVisibility = (args: BubbleWindowLayoutSyncArgs): void => {
+    const nextShellBubbleVisible =
+      args.isUiVisible ||
+      isBubbleVisible ||
+      args.isAwaitingAssistant ||
+      args.hasVrmError
+
     shellEl.classList.toggle('shell--ui-hidden', !args.isUiVisible)
     shellEl.classList.toggle('shell--ui-active', args.isUiVisible)
-    shellEl.classList.toggle(
-      'shell--bubble-visible',
-      args.isUiVisible ||
-        isBubbleVisible ||
-        args.isAwaitingAssistant ||
-        args.hasVrmError
-    )
+    shellEl.classList.toggle('shell--bubble-visible', nextShellBubbleVisible)
+
+    if (lastShellBubbleVisible !== nextShellBubbleVisible) {
+      lastShellBubbleVisible = nextShellBubbleVisible
+      options.onShellBubbleVisibilityChange?.(nextShellBubbleVisible)
+    }
   }
 
   const resizeWindowToFitBubble = async (): Promise<void> => {
@@ -166,7 +175,7 @@ export function createBubbleWindowLayoutController(options: {
       isBubbleVisible = false
       syncUiVisibility(lastArgs)
       syncWindowBoundsToBubble()
-    }, BUBBLE_EXPIRY_MS)
+    }, bubbleExpiryMs)
   }
 
   return {

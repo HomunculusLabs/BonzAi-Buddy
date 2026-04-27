@@ -1,6 +1,5 @@
 import type { BrowserWindow } from 'electron'
 import {
-  type AssistantAction,
   type AssistantActionExecutionRequest,
   type AssistantActionExecutionResponse,
   type AssistantActionType,
@@ -25,11 +24,16 @@ import {
   type UpdateRuntimeApprovalSettingsRequest,
   type ShellState
 } from '../shared/contracts'
-import { isRecord, normalizeError } from '../shared/value-utils'
+import { normalizeError } from '../shared/value-utils'
 import { BonziRuntimeManager } from './eliza/runtime-manager'
-import { truncate } from './assistant-action-param-utils'
-import { executeAssistantAction } from './assistant-action-executor'
-import { createPendingAssistantAction } from './assistant-action-presentation'
+import {
+  normalizeActionExecutionRequest,
+  normalizeCancelWorkflowRequest,
+  normalizeCommandRequest,
+  normalizeWorkflowApprovalRequest
+} from './assistant-request-normalization'
+import { createDiscordBrowserServiceFromEnv } from './discord-browser-service'
+import { PendingAssistantActions } from './pending-assistant-actions'
 
 interface AssistantServiceOptions {
   getCompanionWindow: () => BrowserWindow | null
@@ -82,11 +86,20 @@ export interface AssistantService {
 export function createAssistantService(
   options: AssistantServiceOptions
 ): AssistantService {
+  const discordBrowserService = createDiscordBrowserServiceFromEnv()
   const runtimeManager = new BonziRuntimeManager({
     getShellState: options.getShellState,
-    getCompanionWindow: options.getCompanionWindow
+    getCompanionWindow: options.getCompanionWindow,
+    discordBrowserService
   })
-  const pendingActions = new Map<string, AssistantAction>()
+  const pendingActions = new PendingAssistantActions({
+    getShellState: options.getShellState,
+    getCompanionWindow: options.getCompanionWindow,
+    getApprovalSettings: () => runtimeManager.getRuntimeApprovalSettings(),
+    discordBrowserService,
+    recordActionObservation: (action, message) =>
+      runtimeManager.recordActionObservation(action, message)
+  })
 
   return {
     getProviderInfo: () => runtimeManager.getProviderInfo(),
@@ -191,27 +204,9 @@ export function createAssistantService(
 
       try {
         const runtimeTurn = await runtimeManager.sendCommand(normalizedRequest.command)
-        const approvalSettings = runtimeManager.getRuntimeApprovalSettings()
-        const actions: AssistantAction[] = []
-
-        for (const action of runtimeTurn.actions) {
-          const pendingAction = createPendingAssistantAction(action, approvalSettings)
-          pendingActions.set(pendingAction.id, pendingAction)
-
-          if (approvalSettings.approvalsEnabled) {
-            actions.push(pendingAction)
-            continue
-          }
-
-          const executedAction = await executePendingAction(pendingAction, {
-            getShellState: options.getShellState,
-            getCompanionWindow: options.getCompanionWindow,
-            recordActionObservation: (completedAction, message) =>
-              runtimeManager.recordActionObservation(completedAction, message)
-          })
-          pendingActions.set(executedAction.id, executedAction)
-          actions.push(executedAction)
-        }
+        const actions = await pendingActions.createActionsForRuntimeTurn(
+          runtimeTurn.actions
+        )
 
         return {
           ok: true,
@@ -244,201 +239,13 @@ export function createAssistantService(
         }
       }
 
-      const action = pendingActions.get(normalizedRequest.actionId)
-
-      if (!action) {
-        return {
-          ok: false,
-          message: 'That assistant action is no longer available.',
-          confirmationRequired: false
-        }
-      }
-
-      if (action.status === 'completed') {
-        return {
-          ok: true,
-          action,
-          message: action.resultMessage ?? 'Action already completed.',
-          confirmationRequired: false
-        }
-      }
-
-      const approvalsEnabled =
-        runtimeManager.getRuntimeApprovalSettings().approvalsEnabled
-
-      if (approvalsEnabled && action.requiresConfirmation && !normalizedRequest.confirmed) {
-        const awaitingConfirmation: AssistantAction = {
-          ...action,
-          status: 'needs_confirmation'
-        }
-
-        pendingActions.set(awaitingConfirmation.id, awaitingConfirmation)
-
-        return {
-          ok: false,
-          action: awaitingConfirmation,
-          message: 'Confirmation required. Run the action again to approve it.',
-          confirmationRequired: true
-        }
-      }
-
-      const executedAction = await executePendingAction(action, {
-        getShellState: options.getShellState,
-        getCompanionWindow: options.getCompanionWindow,
-        recordActionObservation: (completedAction, message) =>
-          runtimeManager.recordActionObservation(completedAction, message)
-      })
-
-      pendingActions.set(executedAction.id, executedAction)
-
-      return {
-        ok: executedAction.status === 'completed',
-        action: executedAction,
-        message: executedAction.resultMessage ?? 'Action finished.',
-        confirmationRequired: false
-      }
+      return pendingActions.execute(normalizedRequest)
     },
     async dispose(): Promise<void> {
       pendingActions.clear()
       await runtimeManager.dispose()
+      await discordBrowserService.dispose()
     }
-  }
-}
-
-function normalizeCommandRequest(request: unknown): {
-  command: string
-  error?: string
-} {
-  if (!isRecord(request)) {
-    return {
-      command: '',
-      error: 'Malformed assistant request.'
-    }
-  }
-
-  const command = typeof request.command === 'string' ? request.command.trim() : ''
-
-  if (!command) {
-    return {
-      command: '',
-      error: 'Enter a command before sending it to the assistant.'
-    }
-  }
-
-  return {
-    command: truncate(command, 2_000)
-  }
-}
-
-function normalizeActionExecutionRequest(request: unknown): {
-  actionId: string
-  confirmed: boolean
-  error?: string
-} {
-  if (!isRecord(request)) {
-    return {
-      actionId: '',
-      confirmed: false,
-      error: 'Malformed assistant action request.'
-    }
-  }
-
-  if (typeof request.actionId !== 'string' || !request.actionId.trim()) {
-    return {
-      actionId: '',
-      confirmed: false,
-      error: 'Assistant action requests must include a valid actionId.'
-    }
-  }
-
-  if (typeof request.confirmed !== 'boolean') {
-    return {
-      actionId: '',
-      confirmed: false,
-      error: 'Assistant action requests must include a boolean confirmed flag.'
-    }
-  }
-
-  return {
-    actionId: request.actionId,
-    confirmed: request.confirmed
-  }
-}
-
-function normalizeWorkflowApprovalRequest(request: unknown): {
-  runId: string
-  stepId: string
-  approved: boolean
-  error?: string
-} {
-  if (!isRecord(request)) {
-    return {
-      runId: '',
-      stepId: '',
-      approved: false,
-      error: 'Malformed workflow approval request.'
-    }
-  }
-
-  const runId = typeof request.runId === 'string' ? request.runId.trim() : ''
-  const stepId = typeof request.stepId === 'string' ? request.stepId.trim() : ''
-
-  if (!runId) {
-    return {
-      runId: '',
-      stepId: '',
-      approved: false,
-      error: 'Workflow approval requests must include a runId.'
-    }
-  }
-
-  if (!stepId) {
-    return {
-      runId: '',
-      stepId: '',
-      approved: false,
-      error: 'Workflow approval requests must include a stepId.'
-    }
-  }
-
-  if (typeof request.approved !== 'boolean') {
-    return {
-      runId: '',
-      stepId: '',
-      approved: false,
-      error: 'Workflow approval requests must include a boolean approved flag.'
-    }
-  }
-
-  return {
-    runId,
-    stepId,
-    approved: request.approved
-  }
-}
-
-function normalizeCancelWorkflowRequest(request: unknown): {
-  runId: string
-  error?: string
-} {
-  if (!isRecord(request)) {
-    return {
-      runId: '',
-      error: 'Malformed cancel workflow request.'
-    }
-  }
-
-  const runId = typeof request.runId === 'string' ? request.runId.trim() : ''
-
-  if (!runId) {
-    return {
-      runId: '',
-      error: 'Cancel workflow requests must include a runId.'
-    }
-  }
-
-  return {
-    runId
   }
 }
 
@@ -453,44 +260,3 @@ function createAssistantMessage(
     createdAt: new Date().toISOString()
   }
 }
-
-async function executePendingAction(
-  action: AssistantAction,
-  deps: {
-    getShellState: () => ShellState
-    getCompanionWindow: () => BrowserWindow | null
-    recordActionObservation: (
-      action: AssistantAction,
-      message: string
-    ) => Promise<void>
-  }
-): Promise<AssistantAction> {
-  try {
-    const message = await executeAssistantAction(action, {
-      shellState: deps.getShellState(),
-      companionWindow: deps.getCompanionWindow()
-    })
-
-    const completedAction: AssistantAction = {
-      ...action,
-      status: 'completed',
-      resultMessage: message
-    }
-
-    await deps.recordActionObservation(completedAction, message)
-    return completedAction
-  } catch (error) {
-    const failedAction: AssistantAction = {
-      ...action,
-      status: 'failed',
-      resultMessage: normalizeError(error)
-    }
-
-    await deps.recordActionObservation(
-      failedAction,
-      failedAction.resultMessage ?? 'Action failed.'
-    )
-    return failedAction
-  }
-}
-

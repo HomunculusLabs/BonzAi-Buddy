@@ -55,9 +55,16 @@ const ACTION_DEFAULTS: Record<
   },
   'discord-snapshot': {
     type: 'discord-snapshot',
-    title: 'Inspect Discord',
+    title: 'Inspect native Discord app',
     description:
-      'Use Cua Driver to launch or find Discord and return a readable window snapshot. This does not send messages.',
+      'Use Cua Driver to inspect the native Discord app. Prefer Discord Web DOM context unless the user explicitly asks for the app/Cua path. This does not send messages.',
+    requiresConfirmation: false
+  },
+  'discord-read-context': {
+    type: 'discord-read-context',
+    title: 'Read Discord context',
+    description:
+      'Use Discord Web in a browser session and extract the visible chat context from the DOM. This uses no screenshots or OCR and does not send messages.',
     requiresConfirmation: false
   },
   'discord-read-screenshot': {
@@ -78,7 +85,7 @@ const ACTION_DEFAULTS: Record<
     type: 'discord-type-draft',
     title: 'Type Discord draft',
     description:
-      'Use Cua Driver to type a draft into Discord. This will not press Enter or send the message.',
+      'Use Discord Web in a browser session to type a draft into the composer. This will not press Enter or send the message.',
     requiresConfirmation: false
   }
 }

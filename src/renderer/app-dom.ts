@@ -36,7 +36,7 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
           </div>
         </div>
         <div class="titlebar__actions">
-          <button class="window-button" data-action="settings" type="button" aria-label="Open settings">⚙</button>
+          <button class="window-button" data-action="settings" type="button" aria-label="Open settings" hidden>⚙</button>
           <button class="window-button" data-action="minimize" type="button">–</button>
           <button class="window-button window-button--danger" data-action="close" type="button">×</button>
         </div>

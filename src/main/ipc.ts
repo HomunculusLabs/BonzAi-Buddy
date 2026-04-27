@@ -23,6 +23,49 @@ interface RegisterIpcHandlersOptions {
 
 let handlersRegistered = false
 
+const MAIN_MOUSE_IGNORE_FAILSAFE_MS = 750
+const mouseIgnoreResetTimers = new WeakMap<
+  BrowserWindow,
+  ReturnType<typeof setTimeout>
+>()
+
+function clearMouseIgnoreResetTimer(targetWindow: BrowserWindow): void {
+  const timer = mouseIgnoreResetTimers.get(targetWindow)
+
+  if (!timer) {
+    return
+  }
+
+  clearTimeout(timer)
+  mouseIgnoreResetTimers.delete(targetWindow)
+}
+
+function applyMouseEventsIgnored(
+  targetWindow: BrowserWindow,
+  ignored: boolean
+): void {
+  clearMouseIgnoreResetTimer(targetWindow)
+
+  if (!ignored) {
+    targetWindow.setIgnoreMouseEvents(false)
+    return
+  }
+
+  targetWindow.setIgnoreMouseEvents(true, { forward: true })
+
+  const timer = setTimeout(() => {
+    mouseIgnoreResetTimers.delete(targetWindow)
+
+    if (targetWindow.isDestroyed()) {
+      return
+    }
+
+    targetWindow.setIgnoreMouseEvents(false)
+  }, MAIN_MOUSE_IGNORE_FAILSAFE_MS)
+
+  mouseIgnoreResetTimers.set(targetWindow, timer)
+}
+
 function handleInvoke<Channel extends IpcInvokeChannel>(
   channel: Channel,
   listener: (
@@ -129,9 +172,13 @@ export function registerIpcHandlers(
   })
 
   onSend(IPC_CHANNELS.window.setMouseEventsIgnored, (event, ignored) => {
-    BrowserWindow.fromWebContents(event.sender)?.setIgnoreMouseEvents(ignored, {
-      forward: ignored
-    })
+    const targetWindow = BrowserWindow.fromWebContents(event.sender)
+
+    if (!targetWindow) {
+      return
+    }
+
+    applyMouseEventsIgnored(targetWindow, ignored)
   })
 
   onSend(IPC_CHANNELS.window.setBounds, (event, bounds) => {

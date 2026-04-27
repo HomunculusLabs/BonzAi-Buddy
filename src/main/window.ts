@@ -61,5 +61,11 @@ function resolveRendererTarget(): string {
     target.searchParams.set('bonziDisableVrm', '1')
   }
 
+  const bubbleExpiryMs = Number(process.env.BONZI_BUBBLE_EXPIRY_MS)
+
+  if (Number.isFinite(bubbleExpiryMs) && bubbleExpiryMs >= 0) {
+    target.searchParams.set('bonziBubbleExpiryMs', String(bubbleExpiryMs))
+  }
+
   return target.toString()
 }

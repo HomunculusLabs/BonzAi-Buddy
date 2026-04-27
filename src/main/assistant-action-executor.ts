@@ -9,9 +9,9 @@ import {
   captureDiscordScreenshot,
   checkCuaDriverStatus,
   scrollDiscord,
-  snapshotDiscordState,
-  typeDiscordDraft
+  snapshotDiscordState
 } from './cua-driver'
+import type { DiscordBrowserActionService } from './discord-browser-service'
 import {
   normalizeScrollDirection,
   normalizeText,
@@ -23,6 +23,7 @@ import { describeImageWithVision } from './vision-client'
 interface AssistantActionExecutorDeps {
   shellState: ShellState
   companionWindow: BrowserWindow | null
+  discordBrowserService: DiscordBrowserActionService
 }
 
 export interface WorkflowBonziDesktopActionProposal {
@@ -102,12 +103,20 @@ export async function executeAssistantAction(
       return checkCuaDriverStatus()
     case 'discord-snapshot':
       return snapshotDiscordState(action.params?.query)
+    case 'discord-read-context':
+      return deps.discordBrowserService.readContext({
+        url: action.params?.url,
+        query: action.params?.query
+      })
     case 'discord-read-screenshot':
       return readDiscordScreenshotWithVision(action.params?.query)
     case 'discord-scroll':
       return scrollDiscord(resolveDiscordScrollDirection(action.params?.direction), action.params?.amount)
     case 'discord-type-draft':
-      return typeDiscordDraft(action.params?.text ?? '')
+      return deps.discordBrowserService.typeDraft({
+        url: action.params?.url,
+        text: action.params?.text ?? ''
+      })
     default:
       return assertNever(action.type)
   }

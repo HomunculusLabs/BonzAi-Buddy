@@ -79,6 +79,11 @@ p {
   pointer-events: auto;
 }
 
+.shell--ui-hidden [data-action='settings'] {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .shell--ui-hidden .speech-bubble-shell {
   opacity: 0;
   pointer-events: none;
@@ -109,6 +114,22 @@ p {
 .shell--ui-hidden:not(.shell--bubble-visible) .stage-shell {
   top: 24px;
   bottom: 12px;
+}
+
+.shell--ui-active.shell--bubble-visible .speech-bubble-shell {
+  top: 16px;
+  bottom: 356px;
+  left: 50%;
+  right: auto;
+  width: fit-content;
+  max-width: calc(100vw - 40px);
+  transform: translateX(-50%);
+}
+
+.shell--ui-active.shell--bubble-visible .stage-shell {
+  top: auto;
+  bottom: 64px;
+  height: 420px;
 }
 
 .titlebar {
@@ -503,6 +524,14 @@ p {
   background: transparent;
   color: rgba(38, 29, 66, 0.96);
   box-shadow: none;
+  pointer-events: auto;
+}
+
+.shell:not(.shell--bubble-visible) .speech-bubble {
+  pointer-events: none;
+}
+
+.shell--bubble-visible .speech-bubble {
   pointer-events: auto;
 }
 

@@ -29,6 +29,11 @@ interface FakePluginRegistry {
   close: () => Promise<void>
 }
 
+interface FakeDiscordDomServer {
+  url: string
+  close: () => Promise<void>
+}
+
 test('boots and completes an assistant roundtrip through the real Electron app', async () => {
   const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-'))
   const env = {
@@ -77,6 +82,186 @@ test('boots and completes an assistant roundtrip through the real Electron app',
   }
 })
 
+test('reads Discord Web DOM context and persists the action observation', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-discord-context-'))
+  const discord = await startFakeDiscordDomServer()
+  const env = {
+    ...process.env,
+    BONZI_E2E_MODE: '1',
+    BONZI_ASSISTANT_PROVIDER: 'eliza-classic',
+    BONZI_DISABLE_GPU: '1',
+    BONZI_OPAQUE_WINDOW: '1',
+    BONZI_DISABLE_VRM: '1',
+    BONZI_USER_DATA_DIR: userDataDir,
+    BONZI_E2E_DISCORD_URL: discord.url,
+    BONZI_DISCORD_BROWSER_SHOW_FOR_LOGIN: '0'
+  }
+  delete env.ELECTRON_RENDERER_URL
+
+  const app = await electron.launch({
+    args: [join(process.cwd(), 'out/main/index.js')],
+    env
+  })
+
+  try {
+    const window = await app.firstWindow()
+    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+
+    const response = await window.evaluate(() =>
+      window.bonzi.assistant.sendCommand({ command: 'discord context e2e' })
+    )
+    expect(response.actions).toHaveLength(1)
+    expect(response.actions[0]?.type).toBe('discord-read-context')
+
+    const execution = await window.evaluate((actionId) =>
+      window.bonzi.assistant.executeAction({ actionId, confirmed: false }),
+      response.actions[0]!.id
+    )
+    expect(execution.ok).toBe(true)
+    expect(execution.message).toContain('Discord Web DOM context')
+    expect(execution.message).toContain('Alice: Can Bonzi read this channel?')
+    expect(execution.message).toContain('Bob: Yes, from the browser DOM.')
+    expect(execution.message).toContain('no screenshots or OCR')
+
+    const history = await window.evaluate(() => window.bonzi.assistant.getHistory())
+    const serializedHistory = history.map((message) => message.content).join('\n')
+    expect(serializedHistory).toContain('[Bonzi action observation: discord-read-context / completed]')
+    expect(serializedHistory).toContain('Alice: Can Bonzi read this channel?')
+  } finally {
+    await app.close()
+    await discord.close()
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
+test('types a Discord Web draft without sending it', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-discord-draft-'))
+  const discord = await startFakeDiscordDomServer()
+  const env = {
+    ...process.env,
+    BONZI_E2E_MODE: '1',
+    BONZI_ASSISTANT_PROVIDER: 'eliza-classic',
+    BONZI_DISABLE_GPU: '1',
+    BONZI_OPAQUE_WINDOW: '1',
+    BONZI_DISABLE_VRM: '1',
+    BONZI_USER_DATA_DIR: userDataDir,
+    BONZI_E2E_DISCORD_URL: discord.url,
+    BONZI_DISCORD_BROWSER_SHOW_FOR_LOGIN: '0'
+  }
+  delete env.ELECTRON_RENDERER_URL
+
+  const app = await electron.launch({
+    args: [join(process.cwd(), 'out/main/index.js')],
+    env
+  })
+
+  try {
+    const window = await app.firstWindow()
+    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+
+    const response = await window.evaluate(() =>
+      window.bonzi.assistant.sendCommand({ command: 'discord draft e2e' })
+    )
+    expect(response.actions).toHaveLength(1)
+    expect(response.actions[0]?.type).toBe('discord-type-draft')
+
+    const execution = await window.evaluate((actionId) =>
+      window.bonzi.assistant.executeAction({ actionId, confirmed: false }),
+      response.actions[0]!.id
+    )
+    expect(execution.ok).toBe(true)
+    expect(execution.message).toContain('Typed a Discord Web draft')
+    expect(execution.message).toContain('did not press Enter')
+    expect(execution.message).toContain('did not send')
+  } finally {
+    await app.close()
+    await discord.close()
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
+test('drags after a speech bubble expires without stale bubble hit targets', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-drag-expiry-'))
+  const env = {
+    ...process.env,
+    BONZI_E2E_MODE: '1',
+    BONZI_ASSISTANT_PROVIDER: 'eliza-classic',
+    BONZI_BUBBLE_EXPIRY_MS: '100',
+    BONZI_DISABLE_GPU: '1',
+    BONZI_OPAQUE_WINDOW: '1',
+    BONZI_DISABLE_VRM: '1',
+    BONZI_USER_DATA_DIR: userDataDir
+  }
+  delete env.ELECTRON_RENDERER_URL
+
+  const app = await electron.launch({
+    args: [join(process.cwd(), 'out/main/index.js')],
+    env
+  })
+
+  try {
+    const window = await app.firstWindow()
+
+    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+    await window.locator('.stage-shell').dblclick()
+
+    const commandInput = window.locator('#assistant-command')
+    await commandInput.fill('hello expiry e2e')
+    await commandInput.press('Enter')
+
+    await expect(
+      window.locator('.bubble-entry--assistant .bubble-entry__content')
+    ).toHaveText('E2E assistant reply for: hello expiry e2e')
+    await expect(window.locator('.shell.shell--bubble-visible')).toBeVisible()
+
+    const bubbleBox = await window.locator('.speech-bubble').boundingBox()
+    expect(bubbleBox).not.toBeNull()
+    const stalePoint = {
+      x: Math.round(bubbleBox!.x + bubbleBox!.width / 2),
+      y: Math.round(bubbleBox!.y + bubbleBox!.height / 2)
+    }
+
+    await expect
+      .poll(() =>
+        window.locator('.shell').evaluate((shell) =>
+          shell.classList.contains('shell--bubble-visible')
+        )
+      )
+      .toBe(false)
+
+    const stalePointHitsBubble = await window.evaluate(({ x, y }) => {
+      return Boolean(document.elementFromPoint(x, y)?.closest('.speech-bubble'))
+    }, stalePoint)
+    expect(stalePointHitsBubble).toBe(false)
+
+    const stageBox = await window.locator('.stage-shell').boundingBox()
+    expect(stageBox).not.toBeNull()
+    const start = {
+      x: Math.round(stageBox!.x + stageBox!.width / 2),
+      y: Math.round(stageBox!.y + stageBox!.height / 2)
+    }
+    const beforeBounds = await window.evaluate(() => window.bonzi.window.getBounds())
+    expect(beforeBounds).not.toBeNull()
+
+    await window.mouse.move(start.x, start.y)
+    await window.mouse.down()
+    await window.mouse.move(start.x + 36, start.y + 24, { steps: 4 })
+    await window.mouse.up()
+
+    await expect
+      .poll(() => window.evaluate(() => window.bonzi.window.getBounds()))
+      .not.toEqual(beforeBounds)
+  } finally {
+    await app.close()
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
+// Manual transparent-window validation remains required on macOS: launch without
+// BONZI_OPAQUE_WINDOW=1 and without BONZI_DISABLE_VRM=1, send a message, wait for
+// bubble expiry, move across transparent stage space, then drag the visible avatar
+// repeatedly to verify Electron click-through never strands the window.
+
 test.fixme(
   'renders workflow progress + approval controls in renderer',
   async () => {
@@ -107,6 +292,7 @@ test('manages bundled optional plugins from settings catalog', async () => {
     const window = await app.firstWindow()
 
     await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+    await window.locator('.stage-shell').dblclick()
     await window.locator('[data-action="settings"]').click()
 
     const installedContextRow = window.locator(
@@ -184,6 +370,7 @@ test('toggles runtime action approvals with explicit disable confirmation', asyn
       window.evaluate(() => window.bonzi.settings.getRuntimeApprovalSettings())
     ).toEqual({ approvalsEnabled: true })
 
+    await window.locator('.stage-shell').dblclick()
     await window.locator('[data-action="settings"]').click()
 
     const approvalToggle = window.locator('[data-approval-toggle]')
@@ -254,6 +441,7 @@ test('auto-runs action cards when approvals are disabled', async () => {
     await expect(window.locator('.action-chip')).toHaveCount(1)
     await expect(window.locator('[data-action-id]')).toHaveText('Run action')
 
+    await window.locator('.stage-shell').dblclick()
     await window.locator('[data-action="settings"]').click()
     window.once('dialog', async (dialog) => {
       expect(dialog.type()).toBe('confirm')
@@ -314,6 +502,7 @@ test('migrates legacy curated plugin settings to V2 records', async () => {
     const window = await app.firstWindow()
 
     await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+    await window.locator('.stage-shell').dblclick()
     await window.locator('[data-action="settings"]').click()
 
     const installedContextRow = window.locator(
@@ -398,6 +587,7 @@ test('heals malformed V2 plugin settings records', async () => {
     const window = await app.firstWindow()
 
     await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+    await window.locator('.stage-shell').dblclick()
     await window.locator('[data-action="settings"]').click()
 
     await expect(
@@ -469,6 +659,7 @@ test('discovers plugins from registry endpoint via preload bridge', async () => 
       'Registry marked this plugin as incompatible.'
     )
 
+    await window.locator('.stage-shell').dblclick()
     await window.locator('[data-action="settings"]').click()
     const weatherDiscoverRow = window.locator(
       '[data-plugin-id="weather"][data-plugin-available="true"]'
@@ -559,6 +750,54 @@ test('routes live embedding requests through the managed embeddings proxy', asyn
     await rm(userDataDir, { recursive: true, force: true })
   }
 })
+
+async function startFakeDiscordDomServer(): Promise<FakeDiscordDomServer> {
+  const server = createServer((request, response) => {
+    if (request.method === 'GET' && request.url?.startsWith('/channels/test/server/channel')) {
+      response.statusCode = 200
+      response.setHeader('Content-Type', 'text/html; charset=utf-8')
+      response.end(`<!doctype html>
+<html>
+  <head><title>Fake Discord Channel</title></head>
+  <body>
+    <main>
+      <h1>#general</h1>
+      <section data-list-id="chat-messages" aria-label="Messages in general">
+        <article role="article" id="chat-messages-1">
+          <h3><span id="message-username-1">Alice</span></h3>
+          <time datetime="2026-04-27T12:00:00.000Z">Today at noon</time>
+          <div id="message-content-1">Can Bonzi read this channel?</div>
+        </article>
+        <article role="article" id="chat-messages-2">
+          <h3><span id="message-username-2">Bob</span></h3>
+          <time datetime="2026-04-27T12:01:00.000Z">Today at 12:01</time>
+          <div id="message-content-2">Yes, from the browser DOM.</div>
+        </article>
+      </section>
+      <div role="textbox" contenteditable="true" aria-label="Message #general"></div>
+    </main>
+  </body>
+</html>`)
+      return
+    }
+
+    response.statusCode = 404
+    response.end('Not found')
+  })
+
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+
+  const address = server.address()
+  if (!address || typeof address === 'string') {
+    throw new Error('Failed to bind fake Discord DOM server.')
+  }
+
+  return {
+    url: `http://127.0.0.1:${address.port}/channels/test/server/channel`,
+    close: () => closeServer(server)
+  }
+}
 
 async function startFakePluginRegistry(): Promise<FakePluginRegistry> {
   let requests = 0

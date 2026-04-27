@@ -119,21 +119,48 @@ const BONZI_DESKTOP_ACTION_SPECS = [
     similes: ['CHECK_CUA_STATUS', 'CUA_STATUS', 'CHECK_COMPUTER_USE_DRIVER', 'cua-check-status']
   },
   {
+    elizaName: 'DISCORD_READ_CONTEXT',
+    type: 'discord-read-context',
+    title: 'Read Discord context',
+    description:
+      'Default Discord reading action. Ask Bonzi to use a browser session for Discord Web and extract the current chat context from the DOM. This uses no screenshots or OCR, does not use the native Discord app, and does not send messages.',
+    requiresConfirmation: false,
+    similes: ['READ_DISCORD', 'INSPECT_DISCORD', 'READ_DISCORD_CONTEXT', 'READ_DISCORD_WEB', 'DISCORD_CONTEXT', 'discord-read-context'],
+    parameters: [
+      {
+        name: 'url',
+        description:
+          'Optional Discord Web channel or DM URL to open before reading, such as https://discord.com/channels/@me.',
+        required: false,
+        schema: { type: 'string' },
+        examples: ['https://discord.com/channels/@me']
+      },
+      {
+        name: 'query',
+        description:
+          'Optional short instruction for what to read from the Discord Web DOM, such as latest messages or reply context.',
+        required: false,
+        schema: { type: 'string' },
+        examples: ['latest visible messages', 'what should I reply to?']
+      }
+    ]
+  },
+  {
     elizaName: 'DISCORD_SNAPSHOT',
     type: 'discord-snapshot',
-    title: 'Inspect Discord',
+    title: 'Inspect native Discord app',
     description:
-      'Ask Bonzi to use Cua Driver to launch or find Discord and return a readable snapshot of the current Discord window for context. This does not send messages.',
+      'Ask Bonzi to use Cua Driver to launch or find the native Discord app and return an accessibility snapshot. Use this only when the user explicitly asks for the native app or Cua Driver. This does not send messages.',
     requiresConfirmation: false,
-    similes: ['SNAPSHOT_DISCORD', 'READ_DISCORD', 'INSPECT_DISCORD', 'discord-snapshot'],
+    similes: ['SNAPSHOT_DISCORD_APP', 'INSPECT_NATIVE_DISCORD', 'CUA_DISCORD_SNAPSHOT', 'discord-snapshot'],
     parameters: [
       {
         name: 'query',
         description:
-          'Optional short query describing what to inspect in the Discord window, such as current channel messages or message composer.',
+          'Optional short query describing what to inspect in the native Discord app window.',
         required: false,
         schema: { type: 'string' },
-        examples: ['current channel messages', 'message composer']
+        examples: ['native app message composer']
       }
     ]
   },
@@ -187,14 +214,22 @@ const BONZI_DESKTOP_ACTION_SPECS = [
     type: 'discord-type-draft',
     title: 'Type Discord draft',
     description:
-      'Ask Bonzi to type a draft into Discord using Cua Driver. Bonzi will not press Enter or send the message.',
+      'Ask Bonzi to type a draft into the Discord Web browser composer using DOM insertion. Bonzi will not press Enter or send the message.',
     requiresConfirmation: false,
     similes: ['TYPE_DISCORD_DRAFT', 'PREPARE_DISCORD_REPLY', 'DRAFT_DISCORD_REPLY', 'discord-type-draft'],
     parameters: [
       {
+        name: 'url',
+        description:
+          'Optional Discord Web channel or DM URL to open before typing the draft.',
+        required: false,
+        schema: { type: 'string' },
+        examples: ['https://discord.com/channels/@me']
+      },
+      {
         name: 'text',
         description:
-          'The exact draft text to type into the focused or target Discord message field. Bonzi will not send it.',
+          'The exact draft text to type into the Discord Web message composer. Bonzi will not send it.',
         required: true,
         schema: { type: 'string' },
         examples: ['Thanks, I will take a look.']
@@ -358,6 +393,21 @@ function createActionParams(
       const query = normalizeText(parameters.query)
       return query ? { query: truncate(query, 200) } : undefined
     }
+    case 'discord-read-context': {
+      const url = normalizeText(parameters.url) || inferDiscordUrlFromText(messageText)
+      const query = normalizeText(parameters.query)
+      const params: AssistantActionParams = {}
+
+      if (url) {
+        params.url = truncate(url, 2_048)
+      }
+
+      if (query) {
+        params.query = truncate(query, 500)
+      }
+
+      return hasAssistantActionParams(params) ? params : undefined
+    }
     case 'discord-scroll': {
       const direction = normalizeScrollDirection(parameters.direction) || inferScrollDirectionFromText(messageText)
       const amount = normalizeScrollAmount(parameters.amount)
@@ -365,7 +415,18 @@ function createActionParams(
     }
     case 'discord-type-draft': {
       const text = normalizeDiscordDraftText(parameters.text) || normalizeDiscordDraftText(inferDiscordDraftText(messageText))
-      return text ? { text: truncate(text, 2_000) } : undefined
+      const url = normalizeText(parameters.url) || inferDiscordUrlFromText(messageText)
+      const params: AssistantActionParams = {}
+
+      if (text) {
+        params.text = truncate(text, 2_000)
+      }
+
+      if (url) {
+        params.url = truncate(url, 2_048)
+      }
+
+      return hasAssistantActionParams(params) ? params : undefined
     }
     default:
       return undefined
@@ -404,7 +465,13 @@ function actionDescription(
   }
 
   if (spec.type === 'discord-snapshot' && params?.query) {
-    return `Inspect Discord with query: “${params.query}”. This does not send messages.`
+    return `Inspect the native Discord app with Cua Driver query: “${params.query}”. This does not send messages.`
+  }
+
+  if (spec.type === 'discord-read-context') {
+    const target = params?.url ? ` at ${params.url}` : ''
+    const query = params?.query ? ` with query: “${params.query}”` : ''
+    return `Read Discord Web DOM context${target}${query}. This uses no screenshots or OCR and does not send messages.`
   }
 
   if (spec.type === 'discord-read-screenshot' && params?.query) {
@@ -416,7 +483,8 @@ function actionDescription(
   }
 
   if (spec.type === 'discord-type-draft' && params?.text) {
-    return `Type this Discord draft without pressing Enter or sending it: “${truncate(params.text, 160)}”`
+    const target = params.url ? ` in ${params.url}` : ''
+    return `Type this Discord Web draft${target} without pressing Enter or sending it: “${truncate(params.text, 160)}”`
   }
 
   return spec.description
@@ -434,6 +502,18 @@ function inferUrlLikeText(text: string): string {
   )?.[0]
 
   return domain ? stripTrailingSentencePunctuation(domain) : ''
+}
+
+function inferDiscordUrlFromText(text: string): string {
+  const url = inferUrlLikeText(text)
+
+  if (!url) {
+    return ''
+  }
+
+  return /^(?:https?:\/\/)?(?:discord\.com|discordapp\.com)\/channels\//i.test(url)
+    ? url
+    : ''
 }
 
 function inferSearchQueryFromText(text: string): string {

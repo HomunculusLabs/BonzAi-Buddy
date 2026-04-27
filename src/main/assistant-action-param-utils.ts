@@ -66,7 +66,17 @@ export function normalizeScrollDirection(
 }
 
 export function normalizeScrollAmount(value: unknown): number | undefined {
-  const amount = typeof value === 'number' ? value : Number(normalizeText(value))
+  if (value === undefined || value === null) {
+    return undefined
+  }
+
+  const normalizedText = normalizeText(value)
+
+  if (typeof value !== 'number' && !normalizedText) {
+    return undefined
+  }
+
+  const amount = typeof value === 'number' ? value : Number(normalizedText)
 
   if (!Number.isFinite(amount)) {
     return undefined
