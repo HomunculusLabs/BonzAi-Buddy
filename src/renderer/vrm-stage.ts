@@ -45,6 +45,7 @@ export function createVrmStage(
   const raycaster = new THREE.Raycaster()
   raycaster.params.Line = { threshold: 0.045 }
   const hitTestPointer = new THREE.Vector2()
+  const cameraWorldPosition = new THREE.Vector3()
 
   let animationFrameId = 0
   let activeLoadId = 0
@@ -216,7 +217,13 @@ export function createVrmStage(
         currentAvatar.vrm.update(delta)
       }
 
-      currentJellyfish?.update(delta, animationTimeSeconds, stageScene.pointerNdc)
+      stageScene.camera.getWorldPosition(cameraWorldPosition)
+      currentJellyfish?.update(
+        delta,
+        animationTimeSeconds,
+        stageScene.pointerNdc,
+        cameraWorldPosition
+      )
 
       stageScene.render()
     }
@@ -225,9 +232,13 @@ export function createVrmStage(
   }
 
   function hitTestClientPoint(clientX: number, clientY: number): boolean | null {
+    if (disposed) {
+      return null
+    }
+
     const hitTestRoot = currentAvatar?.vrm.scene ?? currentJellyfish?.root ?? null
 
-    if (disposed || !hitTestRoot) {
+    if (!hitTestRoot) {
       return null
     }
 
@@ -242,6 +253,10 @@ export function createVrmStage(
       -(((clientY - rect.top) / rect.height) * 2 - 1)
     )
     raycaster.setFromCamera(hitTestPointer, stageScene.camera)
+
+    if (currentJellyfish) {
+      return currentJellyfish.hitTest(raycaster)
+    }
 
     return raycaster
       .intersectObject(hitTestRoot, true)
