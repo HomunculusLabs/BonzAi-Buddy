@@ -31,6 +31,8 @@ export interface VrmStageController {
   clear: () => void
   load: (assetPath: string, buddyKind?: VrmStageBuddyKind) => Promise<void>
   playBuiltInEmote: (emoteId: AssistantEventEmoteId) => boolean
+  playDoubleClickAnimation: () => boolean
+  setDragging: (dragging: boolean) => void
 }
 
 export function createVrmStage(
@@ -62,7 +64,9 @@ export function createVrmStage(
     dispose,
     hitTestClientPoint,
     load,
-    playBuiltInEmote
+    playBuiltInEmote,
+    playDoubleClickAnimation,
+    setDragging
   }
 
   async function load(
@@ -247,11 +251,35 @@ export function createVrmStage(
   }
 
   function playBuiltInEmote(emoteId: AssistantEventEmoteId): boolean {
-    if (disposed || !currentAnimation || !currentAvatar) {
+    if (disposed) {
+      return false
+    }
+
+    if (currentJellyfish) {
+      return currentJellyfish.playBuiltInEmote(emoteId, animationTimeSeconds)
+    }
+
+    if (!currentAnimation || !currentAvatar) {
       return false
     }
 
     return currentAnimation.playBuiltInEmote(emoteId, animationTimeSeconds)
+  }
+
+  function playDoubleClickAnimation(): boolean {
+    if (disposed || !currentJellyfish) {
+      return false
+    }
+
+    return currentJellyfish.playDoubleClickAnimation(animationTimeSeconds)
+  }
+
+  function setDragging(dragging: boolean): void {
+    if (disposed) {
+      return
+    }
+
+    currentJellyfish?.setDragging(dragging, animationTimeSeconds)
   }
 
   function clearCurrentSubject(): void {

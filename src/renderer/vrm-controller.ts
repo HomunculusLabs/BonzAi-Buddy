@@ -12,7 +12,9 @@ export interface VrmController {
   hasError(): boolean
   hitTestClientPoint(clientX: number, clientY: number): boolean | null
   load(assetPath: string | null | undefined, buddyKind?: BuddyKind): Promise<void>
+  playDoubleClickAnimation(): void
   playOrQueueEmote(emoteId: AssistantEventEmoteId): void
+  setDragging(dragging: boolean): void
   dispose(): void
 }
 
@@ -55,7 +57,9 @@ export function createVrmController(options: VrmControllerOptions): VrmControlle
           vrmStatusEl.textContent = 'Character renderer disabled for automated tests'
           setErrorMessage(null)
         },
-        playBuiltInEmote: () => false
+        playBuiltInEmote: () => false,
+        playDoubleClickAnimation: () => false,
+        setDragging: () => {}
       }
     : createVrmStage(vrmCanvas, {
         onStatusChange: (message) => {
@@ -108,8 +112,24 @@ export function createVrmController(options: VrmControllerOptions): VrmControlle
     }
   }
 
+  const playDoubleClickAnimation = (): void => {
+    if (disableVrm) {
+      return
+    }
+
+    vrmStage.playDoubleClickAnimation()
+  }
+
+  const setDragging = (dragging: boolean): void => {
+    if (disableVrm) {
+      return
+    }
+
+    vrmStage.setDragging(dragging)
+  }
+
   const playOrQueueEmote = (emoteId: AssistantEventEmoteId): void => {
-    if (disableVrm || currentBuddyKind !== 'bonzi') {
+    if (disableVrm) {
       return
     }
 
@@ -118,14 +138,18 @@ export function createVrmController(options: VrmControllerOptions): VrmControlle
       return
     }
 
-    pendingStageEmote = emoteId
+    if (currentBuddyKind === 'bonzi') {
+      pendingStageEmote = emoteId
+    }
   }
 
   return {
     hasError: () => !vrmErrorEl.hidden,
     hitTestClientPoint: vrmStage.hitTestClientPoint,
     load,
+    playDoubleClickAnimation,
     playOrQueueEmote,
+    setDragging,
     dispose: vrmStage.dispose
   }
 }

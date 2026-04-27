@@ -259,6 +259,7 @@ export function renderApp(root: HTMLDivElement): void {
     canStartDrag: canInteractWithStageFromEvent,
     onDragStateChange: (dragging) => {
       isWindowDragging = dragging
+      vrmController.setDragging(dragging)
 
       if (dragging) {
         forceMouseEventsEnabled()
@@ -318,6 +319,7 @@ export function renderApp(root: HTMLDivElement): void {
     }
 
     event.preventDefault()
+    vrmController.playDoubleClickAnimation()
 
     const nextUiVisible = !conversationController.isUiVisible()
 
