@@ -305,6 +305,35 @@ p {
   border: 1px dashed rgba(255, 255, 255, 0.13);
 }
 
+.companion-settings__field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 11px;
+  border: 1px solid rgba(119, 217, 255, 0.18);
+  border-radius: 15px;
+  background: rgba(92, 198, 255, 0.08);
+  color: rgba(249, 250, 255, 0.92);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.companion-settings__select {
+  min-width: 152px;
+  padding: 7px 10px;
+  border: 1px solid rgba(188, 198, 255, 0.22);
+  border-radius: 11px;
+  background: rgba(8, 11, 22, 0.9);
+  color: rgba(249, 250, 255, 0.96);
+  outline: none;
+}
+
+.companion-settings__select:focus-visible {
+  border-color: rgba(126, 215, 255, 0.72);
+  box-shadow: 0 0 0 3px rgba(90, 195, 255, 0.18);
+}
+
 .plugin-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

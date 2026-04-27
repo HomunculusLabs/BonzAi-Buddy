@@ -12,11 +12,12 @@ import {
   type SettingsPanelController
 } from './settings-panel-controller'
 import { createShellStateController } from './shell-state-controller'
-import { createVrmController } from './vrm-controller'
+import { createVrmController, type BuddyKind } from './vrm-controller'
 import { createWindowDragController } from './window-drag-controller'
 
 const POST_BUBBLE_PASSTHROUGH_SUPPRESSION_MS = 1500
 const RENDERER_MOUSE_IGNORE_LEASE_MS = 250
+const BUDDY_KIND_STORAGE_KEY = 'bonzi.buddyKind'
 
 export function renderApp(root: HTMLDivElement): void {
   const searchParams = new URLSearchParams(window.location.search)
@@ -46,6 +47,7 @@ export function renderApp(root: HTMLDivElement): void {
     approvalSettingsEl,
     pluginSettingsEl,
     settingsStatusEl,
+    buddySelectEl,
     applyRuntimeChangesButton
   } = elements
 
@@ -57,6 +59,9 @@ export function renderApp(root: HTMLDivElement): void {
   let mousePassthroughSuppressedUntilMs = 0
   let settingsPanelController: SettingsPanelController
   let conversationController: ConversationController
+  let currentBuddyKind = readSavedBuddyKind()
+
+  buddySelectEl.value = currentBuddyKind
 
   const bubbleWindowLayout = createBubbleWindowLayoutController({
     bubbleExpiryMs,
@@ -265,7 +270,10 @@ export function renderApp(root: HTMLDivElement): void {
   let assistantEventController: ReturnType<typeof createAssistantEventController> | null = null
 
   const loadVrm = async (): Promise<void> => {
-    await vrmController.load(shellStateController.getShellState()?.vrmAssetPath)
+    await vrmController.load(
+      shellStateController.getShellState()?.vrmAssetPath,
+      currentBuddyKind
+    )
   }
 
   const handleAssistantEvent = (event: AssistantEvent): void => {
@@ -331,6 +339,24 @@ export function renderApp(root: HTMLDivElement): void {
     void loadVrm()
   }
 
+  const handleBuddySelectChange = (): void => {
+    const nextBuddyKind = normalizeBuddyKind(buddySelectEl.value)
+
+    if (nextBuddyKind === currentBuddyKind) {
+      return
+    }
+
+    currentBuddyKind = nextBuddyKind
+
+    try {
+      window.localStorage.setItem(BUDDY_KIND_STORAGE_KEY, currentBuddyKind)
+    } catch {
+      // Non-fatal: the selector can still switch for the current session.
+    }
+
+    void loadVrm()
+  }
+
   const handleWindowMouseMove = (event: MouseEvent): void => {
     syncDesktopMouseEventMode(event)
   }
@@ -341,6 +367,7 @@ export function renderApp(root: HTMLDivElement): void {
   window.addEventListener('keydown', handleWindowKeydown)
   window.addEventListener('mousemove', handleWindowMouseMove)
   vrmRetryButton.addEventListener('click', handleVrmRetryClick)
+  buddySelectEl.addEventListener('change', handleBuddySelectChange)
 
   commandController.setInputEnabled(false)
   shellStateController.setAppReadyState('loading')
@@ -445,6 +472,7 @@ export function renderApp(root: HTMLDivElement): void {
       window.removeEventListener('mousemove', handleWindowMouseMove)
       forceMouseEventsEnabled()
       vrmRetryButton.removeEventListener('click', handleVrmRetryClick)
+      buddySelectEl.removeEventListener('change', handleBuddySelectChange)
       commandController.dispose()
       conversationController.dispose()
       bubbleWindowLayout.dispose()
@@ -456,6 +484,18 @@ export function renderApp(root: HTMLDivElement): void {
   )
 
   syncBubbleWindowLayout()
+}
+
+function normalizeBuddyKind(value: string | null | undefined): BuddyKind {
+  return value === 'jellyfish' ? 'jellyfish' : 'bonzi'
+}
+
+function readSavedBuddyKind(): BuddyKind {
+  try {
+    return normalizeBuddyKind(window.localStorage.getItem(BUDDY_KIND_STORAGE_KEY))
+  } catch {
+    return 'bonzi'
+  }
 }
 
 function parseOptionalNonNegativeNumber(value: string | null): number | undefined {

@@ -21,6 +21,7 @@ export interface MountedAppElements {
   approvalSettingsEl: HTMLElement
   pluginSettingsEl: HTMLElement
   settingsStatusEl: HTMLElement
+  buddySelectEl: HTMLSelectElement
   applyRuntimeChangesButton: HTMLButtonElement
 }
 
@@ -50,6 +51,19 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
           </div>
           <button class="window-button" data-action="settings-close" type="button" aria-label="Close settings">×</button>
         </header>
+        <div class="settings-panel__section companion-settings" data-companion-settings>
+          <div class="settings-panel__section-header">
+            <h3 class="settings-panel__section-title">Buddy</h3>
+            <p class="settings-panel__section-copy">Choose which desktop companion to render.</p>
+          </div>
+          <label class="companion-settings__field">
+            <span>Character</span>
+            <select class="companion-settings__select" data-buddy-select>
+              <option value="bonzi">Bonzi Buddy</option>
+              <option value="jellyfish">Jellyfish Buddy</option>
+            </select>
+          </label>
+        </div>
         <div class="settings-panel__section" data-approval-settings></div>
         <div class="settings-panel__plugins" data-plugin-settings></div>
         <p class="settings-panel__status" data-settings-status aria-live="polite"></p>
@@ -144,6 +158,7 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
   )
   const pluginSettingsEl = root.querySelector<HTMLElement>('[data-plugin-settings]')
   const settingsStatusEl = root.querySelector<HTMLElement>('[data-settings-status]')
+  const buddySelectEl = root.querySelector<HTMLSelectElement>('[data-buddy-select]')
   const applyRuntimeChangesButton = root.querySelector<HTMLButtonElement>(
     '[data-action="apply-runtime-changes"]'
   )
@@ -171,6 +186,7 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
     !approvalSettingsEl ||
     !pluginSettingsEl ||
     !settingsStatusEl ||
+    !buddySelectEl ||
     !applyRuntimeChangesButton
   ) {
     throw new Error('Renderer shell did not mount expected controls.')
@@ -199,6 +215,7 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
     approvalSettingsEl,
     pluginSettingsEl,
     settingsStatusEl,
+    buddySelectEl,
     applyRuntimeChangesButton
   }
 }

@@ -1,11 +1,17 @@
 import type { AssistantEventEmoteId } from '../shared/contracts'
 import type { MountedAppElements } from './app-dom'
-import { createVrmStage, type VrmStageController } from './vrm-stage'
+import {
+  createVrmStage,
+  type VrmStageBuddyKind,
+  type VrmStageController
+} from './vrm-stage'
+
+export type BuddyKind = VrmStageBuddyKind
 
 export interface VrmController {
   hasError(): boolean
   hitTestClientPoint(clientX: number, clientY: number): boolean | null
-  load(assetPath: string | null | undefined): Promise<void>
+  load(assetPath: string | null | undefined, buddyKind?: BuddyKind): Promise<void>
   playOrQueueEmote(emoteId: AssistantEventEmoteId): void
   dispose(): void
 }
@@ -23,6 +29,7 @@ export function createVrmController(options: VrmControllerOptions): VrmControlle
   const { disableVrm } = options
   const { vrmCanvas, vrmStatusEl, vrmErrorEl, vrmRetryButton } = options.elements
   let pendingStageEmote: AssistantEventEmoteId | null = null
+  let currentBuddyKind: BuddyKind = 'bonzi'
 
   const setErrorMessage = (message: string | null): void => {
     if (!message) {
@@ -41,10 +48,11 @@ export function createVrmController(options: VrmControllerOptions): VrmControlle
 
   const vrmStage: VrmStageController = disableVrm
     ? {
+        clear: () => {},
         dispose: () => {},
         hitTestClientPoint: () => null,
         load: async () => {
-          vrmStatusEl.textContent = 'VRM disabled for automated tests'
+          vrmStatusEl.textContent = 'Character renderer disabled for automated tests'
           setErrorMessage(null)
         },
         playBuiltInEmote: () => false
@@ -57,7 +65,7 @@ export function createVrmController(options: VrmControllerOptions): VrmControlle
       })
 
   if (disableVrm) {
-    vrmStatusEl.textContent = 'VRM disabled for automated tests'
+    vrmStatusEl.textContent = 'Character renderer disabled for automated tests'
     setErrorMessage(null)
   }
 
@@ -71,15 +79,28 @@ export function createVrmController(options: VrmControllerOptions): VrmControlle
     }
   }
 
-  const load = async (assetPath: string | null | undefined): Promise<void> => {
-    if (!assetPath) {
+  const load = async (
+    assetPath: string | null | undefined,
+    buddyKind: BuddyKind = currentBuddyKind
+  ): Promise<void> => {
+    const previousBuddyKind = currentBuddyKind
+    currentBuddyKind = buddyKind
+
+    if (buddyKind !== 'bonzi' || previousBuddyKind !== buddyKind) {
+      pendingStageEmote = null
+    }
+
+    if (!assetPath && buddyKind === 'bonzi') {
+      vrmStage.clear()
+      vrmStatusEl.textContent = 'Bonzi asset path unavailable'
+      setErrorMessage('Bonzi asset path unavailable.')
       return
     }
 
     try {
-      await vrmStage.load(assetPath)
+      await vrmStage.load(assetPath ?? '', buddyKind)
 
-      if (!disableVrm) {
+      if (!disableVrm && buddyKind === 'bonzi') {
         flushPendingStageEmote()
       }
     } catch {
@@ -88,7 +109,7 @@ export function createVrmController(options: VrmControllerOptions): VrmControlle
   }
 
   const playOrQueueEmote = (emoteId: AssistantEventEmoteId): void => {
-    if (disableVrm) {
+    if (disableVrm || currentBuddyKind !== 'bonzi') {
       return
     }
 

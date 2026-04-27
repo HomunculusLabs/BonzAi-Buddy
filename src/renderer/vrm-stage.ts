@@ -15,7 +15,10 @@ import {
   createVrmStageAnimationController,
   type VrmStageAnimationController
 } from './vrm-stage-animation'
+import { createJellyfishBuddy, type JellyfishBuddyHandle } from './jellyfish-buddy'
 import { createVrmStageScene } from './vrm-stage-scene'
+
+export type VrmStageBuddyKind = 'bonzi' | 'jellyfish'
 
 interface VrmStageCallbacks {
   onStatusChange?: (message: string) => void
@@ -25,7 +28,8 @@ interface VrmStageCallbacks {
 export interface VrmStageController {
   dispose: () => void
   hitTestClientPoint: (clientX: number, clientY: number) => boolean | null
-  load: (assetPath: string) => Promise<void>
+  clear: () => void
+  load: (assetPath: string, buddyKind?: VrmStageBuddyKind) => Promise<void>
   playBuiltInEmote: (emoteId: AssistantEventEmoteId) => boolean
 }
 
@@ -37,6 +41,7 @@ export function createVrmStage(
   const loader = new GLTFLoader()
   const clock = new THREE.Clock()
   const raycaster = new THREE.Raycaster()
+  raycaster.params.Line = { threshold: 0.045 }
   const hitTestPointer = new THREE.Vector2()
 
   let animationFrameId = 0
@@ -45,6 +50,7 @@ export function createVrmStage(
   let disposed = false
   let currentAnimation: VrmStageAnimationController | null = null
   let currentAvatar: VrmAvatarHandle | null = null
+  let currentJellyfish: JellyfishBuddyHandle | null = null
 
   loader.register((parser) => new VRMLoaderPlugin(parser))
   loader.register((parser) => new VRMAnimationLoaderPlugin(parser))
@@ -52,19 +58,50 @@ export function createVrmStage(
   startAnimationLoop()
 
   return {
+    clear: clearCurrentSubject,
     dispose,
     hitTestClientPoint,
     load,
     playBuiltInEmote
   }
 
-  async function load(assetPath: string): Promise<void> {
+  async function load(
+    assetPath: string,
+    buddyKind: VrmStageBuddyKind = 'bonzi'
+  ): Promise<void> {
     const loadId = ++activeLoadId
 
     callbacks.onErrorChange?.(null)
+
+    if (buddyKind === 'jellyfish') {
+      try {
+        callbacks.onStatusChange?.('Summoning jellyfish buddy…')
+        clearCurrentSubject()
+        currentJellyfish = createJellyfishBuddy(stageScene.scene)
+        stageScene.frameSubject(currentJellyfish.metrics)
+        callbacks.onStatusChange?.('Jellyfish buddy ready')
+      } catch (error) {
+        if (disposed || loadId !== activeLoadId) {
+          return
+        }
+
+        clearCurrentSubject()
+
+        const message =
+          error instanceof Error ? error.message : 'Unknown jellyfish loading failure.'
+
+        console.error('Failed to load jellyfish buddy.', error)
+        callbacks.onErrorChange?.(message)
+        callbacks.onStatusChange?.('Jellyfish buddy failed to load')
+        throw error
+      }
+
+      return
+    }
+
     callbacks.onStatusChange?.('Loading VRM… 0%')
 
-    clearCurrentVrm()
+    clearCurrentSubject()
 
     try {
       const gltf = await loader.loadAsync(assetPath, (event) => {
@@ -111,7 +148,7 @@ export function createVrmStage(
         return
       }
 
-      clearCurrentVrm()
+      clearCurrentSubject()
 
       const message =
         error instanceof Error ? error.message : 'Unknown VRM loading failure.'
@@ -175,6 +212,8 @@ export function createVrmStage(
         currentAvatar.vrm.update(delta)
       }
 
+      currentJellyfish?.update(delta, animationTimeSeconds, stageScene.pointerNdc)
+
       stageScene.render()
     }
 
@@ -182,7 +221,9 @@ export function createVrmStage(
   }
 
   function hitTestClientPoint(clientX: number, clientY: number): boolean | null {
-    if (disposed || !currentAvatar) {
+    const hitTestRoot = currentAvatar?.vrm.scene ?? currentJellyfish?.root ?? null
+
+    if (disposed || !hitTestRoot) {
       return null
     }
 
@@ -198,12 +239,10 @@ export function createVrmStage(
     )
     raycaster.setFromCamera(hitTestPointer, stageScene.camera)
 
-    const avatarScene = currentAvatar.vrm.scene
-
     return raycaster
-      .intersectObject(avatarScene, true)
+      .intersectObject(hitTestRoot, true)
       .some((intersection) =>
-        isVisibleHitTestIntersection(intersection, avatarScene)
+        isVisibleHitTestIntersection(intersection, hitTestRoot)
       )
   }
 
@@ -215,20 +254,23 @@ export function createVrmStage(
     return currentAnimation.playBuiltInEmote(emoteId, animationTimeSeconds)
   }
 
-  function clearCurrentVrm(): void {
+  function clearCurrentSubject(): void {
     if (currentAnimation && currentAvatar) {
       currentAnimation.dispose(currentAvatar.vrm.scene)
     }
 
     currentAnimation = null
 
-    if (!currentAvatar) {
-      stageScene.frameSubject(null)
-      return
+    if (currentAvatar) {
+      disposeVrmAvatar(stageScene.scene, currentAvatar)
+      currentAvatar = null
     }
 
-    disposeVrmAvatar(stageScene.scene, currentAvatar)
-    currentAvatar = null
+    if (currentJellyfish) {
+      currentJellyfish.dispose()
+      currentJellyfish = null
+    }
+
     stageScene.frameSubject(null)
   }
 
@@ -248,7 +290,7 @@ export function createVrmStage(
     disposed = true
 
     window.cancelAnimationFrame(animationFrameId)
-    clearCurrentVrm()
+    clearCurrentSubject()
     stageScene.dispose()
   }
 }
