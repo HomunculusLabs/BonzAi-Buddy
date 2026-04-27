@@ -8,6 +8,7 @@ export interface SettingsStatusController {
   setRuntimeReloadPending(pending: boolean): void
   setPluginSaving(saving: boolean): void
   setApprovalSaving(saving: boolean): void
+  setCharacterSaving(saving: boolean): void
   setApplyingRuntimeChanges(applying: boolean): void
   isApplyingRuntimeChanges(): boolean
   getRuntimeReloadPending(): boolean
@@ -20,22 +21,28 @@ export function createSettingsStatusController(
 
   let isPluginSaving = false
   let isApprovalSaving = false
+  let isCharacterSaving = false
   let isApplyingRuntimeChanges = false
   let isRuntimeReloadPending = false
   let settingsStatusMessage = ''
 
   const syncSettingsStatusUi = (): void => {
     const runtimeMessage = isRuntimeReloadPending
-      ? 'Runtime plugin changes are pending. Apply Runtime Changes to reload elizaOS now.'
+      ? 'Runtime settings changes are pending. Apply Runtime Changes to reload elizaOS now.'
       : ''
 
     settingsStatusEl.textContent = [settingsStatusMessage, runtimeMessage]
       .filter((value) => value.trim().length > 0)
       .join(' ')
 
+    settingsStatusEl.dataset.runtimeReloadPending = String(isRuntimeReloadPending)
+    applyRuntimeChangesButton.dataset.runtimeReloadPending = String(isRuntimeReloadPending)
     applyRuntimeChangesButton.hidden = !isRuntimeReloadPending
     applyRuntimeChangesButton.disabled =
-      isPluginSaving || isApprovalSaving || isApplyingRuntimeChanges
+      isPluginSaving ||
+      isApprovalSaving ||
+      isCharacterSaving ||
+      isApplyingRuntimeChanges
   }
 
   syncSettingsStatusUi()
@@ -55,6 +62,10 @@ export function createSettingsStatusController(
     },
     setApprovalSaving: (saving) => {
       isApprovalSaving = saving
+      syncSettingsStatusUi()
+    },
+    setCharacterSaving: (saving) => {
+      isCharacterSaving = saving
       syncSettingsStatusUi()
     },
     setApplyingRuntimeChanges: (applying) => {

@@ -80,7 +80,10 @@ export function createRuntimeCharacter(options: {
     systemPromptOverride: options.config.systemPromptOverride,
     desktopActionsEnabled: options.runtimeSettings.desktopActionsEnabled,
     contextEnabled: options.runtimeSettings.contextEnabled,
-    approvalsEnabled: options.runtimeSettings.approvalsEnabled
+    approvalsEnabled: options.runtimeSettings.approvalsEnabled,
+    characterOverride: options.runtimeSettings.character.enabled
+      ? options.runtimeSettings.character.override
+      : null
   })
 }
 
@@ -157,7 +160,17 @@ export function createRuntimeConfigSignature(options: {
     effectiveProvider: config.effectiveProvider,
     e2eMode: config.e2eMode,
     systemPromptOverride: config.systemPromptOverride ?? '',
-    pluginSettings: runtimeSettings,
+    pluginSettings: {
+      contextEnabled: runtimeSettings.contextEnabled,
+      desktopActionsEnabled: runtimeSettings.desktopActionsEnabled,
+      approvalsEnabled: runtimeSettings.approvalsEnabled,
+      character: {
+        enabled: runtimeSettings.character.enabled,
+        characterJson: runtimeSettings.character.enabled
+          ? runtimeSettings.character.characterJson
+          : '{}'
+      }
+    },
     externalRuntimePlugins: runtimePluginSelection.map((plugin) => ({
       id: plugin.id,
       packageName: plugin.packageName ?? '',

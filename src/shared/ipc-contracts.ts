@@ -12,6 +12,10 @@ import type {
   UpdateRuntimeApprovalSettingsRequest
 } from './contracts/approvals'
 import type {
+  ElizaCharacterSettings,
+  UpdateElizaCharacterSettingsRequest
+} from './contracts/character'
+import type {
   ElizaPluginDiscoveryRequest,
   ElizaPluginInstallRequest,
   ElizaPluginOperationResult,
@@ -43,7 +47,9 @@ export const IPC_CHANNELS = {
     getElizaPlugins: 'settings:get-eliza-plugins',
     updateElizaPlugins: 'settings:update-eliza-plugins',
     getRuntimeApprovalSettings: 'settings:get-runtime-approval-settings',
-    updateRuntimeApprovalSettings: 'settings:update-runtime-approval-settings'
+    updateRuntimeApprovalSettings: 'settings:update-runtime-approval-settings',
+    getElizaCharacterSettings: 'settings:get-eliza-character-settings',
+    updateElizaCharacterSettings: 'settings:update-eliza-character-settings'
   },
   plugins: {
     discover: 'plugins:discover',
@@ -92,6 +98,14 @@ export type IpcInvokeChannelMap = {
   [IPC_CHANNELS.settings.updateRuntimeApprovalSettings]: {
     args: [request: UpdateRuntimeApprovalSettingsRequest]
     response: RuntimeApprovalSettings
+  }
+  [IPC_CHANNELS.settings.getElizaCharacterSettings]: {
+    args: []
+    response: ElizaCharacterSettings
+  }
+  [IPC_CHANNELS.settings.updateElizaCharacterSettings]: {
+    args: [request: UpdateElizaCharacterSettingsRequest]
+    response: ElizaCharacterSettings
   }
   [IPC_CHANNELS.plugins.discover]: {
     args: [request?: ElizaPluginDiscoveryRequest]
@@ -200,6 +214,10 @@ export interface BonziBridge {
     updateRuntimeApprovalSettings: (
       request: UpdateRuntimeApprovalSettingsRequest
     ) => Promise<RuntimeApprovalSettings>
+    getElizaCharacterSettings: () => Promise<ElizaCharacterSettings>
+    updateElizaCharacterSettings: (
+      request: UpdateElizaCharacterSettingsRequest
+    ) => Promise<ElizaCharacterSettings>
   }
   plugins: {
     discover: (request?: ElizaPluginDiscoveryRequest) => Promise<ElizaPluginSettings>

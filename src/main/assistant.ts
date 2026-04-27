@@ -12,6 +12,7 @@ import {
   type AssistantProviderInfo,
   type AssistantRuntimeStatus,
   type BonziWorkflowRunSnapshot,
+  type ElizaCharacterSettings,
   type ElizaPluginDiscoveryRequest,
   type RespondWorkflowApprovalRequest,
   type RespondWorkflowApprovalResponse,
@@ -20,6 +21,7 @@ import {
   type ElizaPluginOperationResult,
   type ElizaPluginSettings,
   type ElizaPluginUninstallRequest,
+  type UpdateElizaCharacterSettingsRequest,
   type UpdateElizaPluginSettingsRequest,
   type UpdateRuntimeApprovalSettingsRequest,
   type ShellState
@@ -49,6 +51,10 @@ export interface AssistantService {
   updateRuntimeApprovalSettings: (
     request: UpdateRuntimeApprovalSettingsRequest
   ) => Promise<RuntimeApprovalSettings>
+  getCharacterSettings: () => ElizaCharacterSettings
+  updateCharacterSettings: (
+    request: UpdateElizaCharacterSettingsRequest
+  ) => Promise<ElizaCharacterSettings>
   discoverPlugins: (
     request?: ElizaPluginDiscoveryRequest
   ) => Promise<ElizaPluginSettings>
@@ -111,6 +117,12 @@ export function createAssistantService(
       request: UpdateRuntimeApprovalSettingsRequest
     ): Promise<RuntimeApprovalSettings> {
       return runtimeManager.updateRuntimeApprovalSettings(request)
+    },
+    getCharacterSettings: () => runtimeManager.getCharacterSettings(),
+    async updateCharacterSettings(
+      request: UpdateElizaCharacterSettingsRequest
+    ): Promise<ElizaCharacterSettings> {
+      return runtimeManager.updateCharacterSettings(request)
     },
     discoverPlugins: (request) => runtimeManager.discoverPlugins(request),
     updatePluginSettings: (request) => runtimeManager.updatePluginSettings(request),

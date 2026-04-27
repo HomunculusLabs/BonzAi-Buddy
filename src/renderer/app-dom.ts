@@ -18,6 +18,7 @@ export interface MountedAppElements {
   chatInputEl: HTMLInputElement
   assistantSendButton: HTMLButtonElement
   settingsPanelEl: HTMLElement
+  characterSettingsEl: HTMLElement
   approvalSettingsEl: HTMLElement
   pluginSettingsEl: HTMLElement
   settingsStatusEl: HTMLElement
@@ -64,6 +65,7 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
             </select>
           </label>
         </div>
+        <div class="settings-panel__section character-settings" data-character-settings></div>
         <div class="settings-panel__section" data-approval-settings></div>
         <div class="settings-panel__plugins" data-plugin-settings></div>
         <p class="settings-panel__status" data-settings-status aria-live="polite"></p>
@@ -153,6 +155,9 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
     '[data-role="assistant-send"]'
   )
   const settingsPanelEl = root.querySelector<HTMLElement>('[data-settings-panel]')
+  const characterSettingsEl = root.querySelector<HTMLElement>(
+    '[data-character-settings]'
+  )
   const approvalSettingsEl = root.querySelector<HTMLElement>(
     '[data-approval-settings]'
   )
@@ -183,6 +188,7 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
     !chatInputEl ||
     !assistantSendButton ||
     !settingsPanelEl ||
+    !characterSettingsEl ||
     !approvalSettingsEl ||
     !pluginSettingsEl ||
     !settingsStatusEl ||
@@ -212,6 +218,7 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
     chatInputEl,
     assistantSendButton,
     settingsPanelEl,
+    characterSettingsEl,
     approvalSettingsEl,
     pluginSettingsEl,
     settingsStatusEl,

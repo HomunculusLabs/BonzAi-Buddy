@@ -9,6 +9,7 @@ import {
   type HydratePluginSettingsOptions
 } from './plugin-settings-controller'
 import { createApprovalSettingsController } from './approval-settings-controller'
+import { createCharacterSettingsController } from './character-settings-controller'
 import { createSettingsStatusController } from './settings-status-controller'
 
 export interface SettingsPanelController {
@@ -16,6 +17,7 @@ export interface SettingsPanelController {
   toggleVisible(): void
   hydratePluginSettings(options?: HydratePluginSettingsOptions): Promise<void>
   hydrateApprovalSettings(): Promise<void>
+  hydrateCharacterSettings(): Promise<void>
   setPluginSettings(settings: ElizaPluginSettings | null): void
   syncApprovalSettings(settings: RuntimeApprovalSettings | null): void
   getApprovalSettings(): RuntimeApprovalSettings | null
@@ -30,6 +32,7 @@ export interface SettingsPanelControllerOptions {
     | 'settingsButton'
     | 'settingsCloseButton'
     | 'settingsPanelEl'
+    | 'characterSettingsEl'
     | 'approvalSettingsEl'
     | 'pluginSettingsEl'
     | 'settingsStatusEl'
@@ -50,6 +53,7 @@ export function createSettingsPanelController(
     settingsButton,
     settingsCloseButton,
     settingsPanelEl,
+    characterSettingsEl,
     approvalSettingsEl,
     pluginSettingsEl,
     settingsStatusEl,
@@ -72,6 +76,13 @@ export function createSettingsPanelController(
     onApprovalsDisabled: options.onApprovalsDisabled,
     onConversationNeedsRender: options.onConversationNeedsRender,
     onSavingChange: statusController.setApprovalSaving
+  })
+
+  const characterController = createCharacterSettingsController({
+    characterSettingsEl,
+    setStatusMessage: statusController.setStatusMessage,
+    setRuntimeReloadPending: statusController.setRuntimeReloadPending,
+    onSavingChange: statusController.setCharacterSaving
   })
 
   const pluginController = createPluginSettingsController({
@@ -97,6 +108,7 @@ export function createSettingsPanelController(
 
     if (visible) {
       void approvalController.hydrateApprovalSettings()
+      void characterController.hydrate()
       void pluginController.hydrate()
     }
   }
@@ -145,6 +157,7 @@ export function createSettingsPanelController(
     },
     hydratePluginSettings: (hydrateOptions) => pluginController.hydrate(hydrateOptions),
     hydrateApprovalSettings: approvalController.hydrateApprovalSettings,
+    hydrateCharacterSettings: characterController.hydrate,
     setPluginSettings: pluginController.setPluginSettings,
     syncApprovalSettings: approvalController.syncApprovalSettings,
     getApprovalSettings: approvalController.getApprovalSettings,
@@ -158,6 +171,7 @@ export function createSettingsPanelController(
         handleApplyRuntimeChangesClick
       )
       pluginController.dispose()
+      characterController.dispose()
       approvalController.dispose()
     }
   }

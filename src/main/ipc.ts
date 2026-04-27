@@ -144,6 +144,17 @@ export function registerIpcHandlers(
     }
   )
 
+  handleInvoke(IPC_CHANNELS.settings.getElizaCharacterSettings, () => {
+    return assistantService.getCharacterSettings()
+  })
+
+  handleInvoke(
+    IPC_CHANNELS.settings.updateElizaCharacterSettings,
+    async (_event, request) => {
+      return assistantService.updateCharacterSettings(request)
+    }
+  )
+
   handleInvoke(IPC_CHANNELS.plugins.install, async (_event, request) => {
     return assistantService.installPlugin(request)
   })

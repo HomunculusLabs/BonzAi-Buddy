@@ -3,12 +3,14 @@ import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import type {
   AssistantProviderInfo,
+  ElizaCharacterSettings,
   ElizaPluginExecutionPolicy,
   ElizaPluginId,
   ElizaPluginLifecycleStatus,
   ElizaPluginSettings,
   ElizaPluginSource,
   RuntimeApprovalSettings,
+  UpdateElizaCharacterSettingsRequest,
   UpdateElizaPluginSettingsRequest,
   UpdateRuntimeApprovalSettingsRequest
 } from '../../shared/contracts'
@@ -35,6 +37,12 @@ import {
   withBuiltInDefaults
 } from './plugin-settings-normalization'
 import {
+  getDefaultCharacterSettings,
+  toElizaCharacterSettings,
+  toPersistedCharacterSettings,
+  validateCharacterSettingsUpdate
+} from './character-settings-validation'
+import {
   buildPluginSettings,
   buildRuntimeSettings
 } from './plugin-settings-projection'
@@ -56,7 +64,8 @@ export class BonziPluginSettingsStore {
 
     return buildRuntimeSettings({
       inventory: loaded.inventory,
-      approvalsEnabled: loaded.approvalsEnabled
+      approvalsEnabled: loaded.approvalsEnabled,
+      characterSettings: loaded.characterSettings
     })
   }
 
@@ -64,6 +73,28 @@ export class BonziPluginSettingsStore {
     return {
       approvalsEnabled: this.readPersistedPluginInventory().approvalsEnabled
     }
+  }
+
+  getCharacterSettings(): ElizaCharacterSettings {
+    return toElizaCharacterSettings(
+      this.readPersistedPluginInventory().characterSettings
+    )
+  }
+
+  updateCharacterSettings(
+    request: UpdateElizaCharacterSettingsRequest
+  ): ElizaCharacterSettings {
+    const characterSettings = validateCharacterSettingsUpdate(request)
+    const loaded = this.readPersistedPluginInventory()
+
+    this.writePersistedSettings({
+      schemaVersion: 2,
+      plugins: loaded.inventory,
+      approvalsEnabled: loaded.approvalsEnabled,
+      character: toPersistedCharacterSettings(characterSettings)
+    })
+
+    return toElizaCharacterSettings(characterSettings)
   }
 
   updateRuntimeApprovalSettings(
@@ -81,7 +112,8 @@ export class BonziPluginSettingsStore {
     this.writePersistedSettings({
       schemaVersion: 2,
       plugins: loaded.inventory,
-      approvalsEnabled: request.approvalsEnabled
+      approvalsEnabled: request.approvalsEnabled,
+      character: toPersistedCharacterSettings(loaded.characterSettings)
     })
 
     return {
@@ -164,7 +196,8 @@ export class BonziPluginSettingsStore {
     this.writePersistedSettings({
       schemaVersion: 2,
       plugins: state,
-      approvalsEnabled: loaded.approvalsEnabled
+      approvalsEnabled: loaded.approvalsEnabled,
+      character: toPersistedCharacterSettings(loaded.characterSettings)
     })
   }
 
@@ -183,7 +216,8 @@ export class BonziPluginSettingsStore {
     this.writePersistedSettings({
       schemaVersion: 2,
       plugins: state,
-      approvalsEnabled: loaded.approvalsEnabled
+      approvalsEnabled: loaded.approvalsEnabled,
+      character: toPersistedCharacterSettings(loaded.characterSettings)
     })
   }
 
@@ -232,7 +266,8 @@ export class BonziPluginSettingsStore {
     this.writePersistedSettings({
       schemaVersion: 2,
       plugins: state,
-      approvalsEnabled: loaded.approvalsEnabled
+      approvalsEnabled: loaded.approvalsEnabled,
+      character: toPersistedCharacterSettings(loaded.characterSettings)
     })
   }
 
@@ -303,7 +338,8 @@ export class BonziPluginSettingsStore {
     this.writePersistedSettings({
       schemaVersion: 2,
       plugins: state,
-      approvalsEnabled: loaded.approvalsEnabled
+      approvalsEnabled: loaded.approvalsEnabled,
+      character: toPersistedCharacterSettings(loaded.characterSettings)
     })
 
     return this.getSettings(provider)
@@ -319,6 +355,7 @@ export class BonziPluginSettingsStore {
       return {
         inventory: withBuiltInDefaults({}).inventory,
         approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
+        characterSettings: getDefaultCharacterSettings(),
         needsRewrite: false,
         fileExisted: false
       }
@@ -334,13 +371,15 @@ export class BonziPluginSettingsStore {
         this.writePersistedSettings({
           schemaVersion: 2,
           plugins: withDefaults.inventory,
-          approvalsEnabled: loaded.approvalsEnabled
+          approvalsEnabled: loaded.approvalsEnabled,
+          character: toPersistedCharacterSettings(loaded.characterSettings)
         })
       }
 
       return {
         inventory: withDefaults.inventory,
         approvalsEnabled: loaded.approvalsEnabled,
+        characterSettings: loaded.characterSettings,
         needsRewrite,
         fileExisted: loaded.fileExisted
       }
@@ -350,12 +389,14 @@ export class BonziPluginSettingsStore {
       this.writePersistedSettings({
         schemaVersion: 2,
         plugins: withDefaults.inventory,
-        approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled
+        approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
+        character: toPersistedCharacterSettings(getDefaultCharacterSettings())
       })
 
       return {
         inventory: withDefaults.inventory,
         approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
+        characterSettings: getDefaultCharacterSettings(),
         needsRewrite: true,
         fileExisted: true
       }

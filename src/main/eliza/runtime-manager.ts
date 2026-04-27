@@ -8,6 +8,7 @@ import {
   type AssistantProviderInfo,
   type AssistantRuntimeStatus,
   type BonziWorkflowRunSnapshot,
+  type ElizaCharacterSettings,
   type ElizaPluginDiscoveryRequest,
   type ElizaPluginInstallRequest,
   type ElizaPluginOperationResult,
@@ -15,6 +16,7 @@ import {
   type ElizaPluginUninstallRequest,
   type RuntimeApprovalSettings,
   type ShellState,
+  type UpdateElizaCharacterSettingsRequest,
   type UpdateElizaPluginSettingsRequest,
   type UpdateRuntimeApprovalSettingsRequest
 } from '../../shared/contracts'
@@ -175,6 +177,18 @@ export class BonziRuntimeManager {
   ): RuntimeApprovalSettings {
     const settings = this.pluginSettingsStore.updateRuntimeApprovalSettings(request)
     this.workflowManager.setApprovalsEnabled(settings.approvalsEnabled)
+    this.lifecycle.invalidateConfigSignature()
+    return settings
+  }
+
+  getCharacterSettings(): ElizaCharacterSettings {
+    return this.pluginSettingsStore.getCharacterSettings()
+  }
+
+  updateCharacterSettings(
+    request: UpdateElizaCharacterSettingsRequest
+  ): ElizaCharacterSettings {
+    const settings = this.pluginSettingsStore.updateCharacterSettings(request)
     this.lifecycle.invalidateConfigSignature()
     return settings
   }

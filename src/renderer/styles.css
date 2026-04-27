@@ -29,7 +29,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -266,7 +267,8 @@ p {
 }
 
 .settings-panel__plugins,
-.settings-panel__section {
+.settings-panel__section,
+.character-settings {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -415,6 +417,217 @@ p {
 
 .approval-settings-row {
   border-color: rgba(140, 87, 255, 0.22);
+}
+
+
+.settings-card,
+.settings-toggle-card {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.settings-toggle-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 11px;
+}
+
+.settings-toggle-card__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-toggle-card__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  color: rgba(249, 250, 255, 0.96);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.settings-toggle-card__description,
+.character-settings__hint {
+  color: rgba(225, 230, 255, 0.72);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.settings-toggle-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(226, 231, 255, 0.76);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.settings-toggle-card__toggle {
+  width: 18px;
+  height: 18px;
+  accent-color: #8c57ff;
+}
+
+.settings-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(141, 119, 255, 0.18);
+  color: rgba(221, 218, 255, 0.92);
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.character-settings__toggle-card {
+  border-color: rgba(140, 87, 255, 0.24);
+  background: rgba(140, 87, 255, 0.08);
+}
+
+.character-settings__intro,
+.character-settings__topline,
+.character-settings__form-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.character-settings__toolbar,
+.character-settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.character-settings__toolbar,
+.character-settings__section,
+.character-settings__advanced {
+  padding: 11px;
+}
+
+.character-settings__section-title {
+  margin: 0;
+  color: rgba(249, 250, 255, 0.94);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.character-settings__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.character-settings__editor-label {
+  color: rgba(249, 250, 255, 0.88);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.character-settings__input,
+.character-settings__editor {
+  width: 100%;
+  border: 1px solid rgba(188, 198, 255, 0.18);
+  background: rgba(7, 10, 18, 0.86);
+  color: rgba(248, 249, 255, 0.95);
+  outline: none;
+}
+
+.character-settings__input {
+  padding: 10px 11px;
+  border-radius: 12px;
+  font-size: 0.82rem;
+}
+
+.character-settings__editor {
+  min-height: 126px;
+  resize: vertical;
+  padding: 11px 12px;
+  border-radius: 14px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-size: 0.75rem;
+  line-height: 1.48;
+  scrollbar-width: thin;
+}
+
+.character-settings__editor--system {
+  min-height: 220px;
+}
+
+.character-settings__editor--compact {
+  min-height: 96px;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+
+.character-settings__editor--advanced {
+  min-height: 220px;
+}
+
+.character-settings__input:focus,
+.character-settings__editor:focus {
+  border-color: rgba(126, 215, 255, 0.62);
+  box-shadow: 0 0 0 3px rgba(90, 195, 255, 0.16);
+}
+
+.character-settings__input:disabled,
+.character-settings__editor:disabled {
+  opacity: 0.68;
+  cursor: not-allowed;
+}
+
+.character-settings__advanced summary {
+  cursor: pointer;
+  color: rgba(249, 250, 255, 0.9);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.character-settings__advanced[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.character-settings__warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 11px;
+  border: 1px solid rgba(255, 190, 112, 0.24);
+  border-radius: 15px;
+  background: rgba(255, 170, 75, 0.12);
+  color: rgba(255, 232, 202, 0.96);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.character-settings__warnings strong {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.character-settings__warnings ul {
+  margin: 0;
+  padding-left: 17px;
+}
+
+.character-settings__save,
+.character-settings__reset {
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 11px;
+  font-size: 0.74rem;
 }
 
 .plugin-row__button {

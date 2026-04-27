@@ -1,15 +1,53 @@
 import type {
   AssistantProviderInfo,
+  ElizaCharacterSettings,
   ElizaOptionalPluginId,
   ElizaPluginExecutionPolicy,
   ElizaPluginLifecycleStatus,
   ElizaPluginSource
 } from '../../shared/contracts'
 
+export interface SanitizedBonziMessageExample {
+  name: string
+  content: {
+    text: string
+  }
+}
+
+export interface SanitizedBonziCharacterOverride {
+  name?: string
+  system?: string
+  bio?: string | string[]
+  lore?: string[]
+  messageExamples?: SanitizedBonziMessageExample[][]
+  postExamples?: string[]
+  topics?: string[]
+  adjectives?: string[]
+  style?: {
+    all?: string[]
+    chat?: string[]
+    post?: string[]
+  }
+}
+
+export interface PersistedCharacterSettings {
+  enabled: boolean
+  characterJson: string
+}
+
+export interface NormalizedCharacterSettings extends ElizaCharacterSettings {
+  override: SanitizedBonziCharacterOverride | null
+}
+
 export interface BonziElizaPluginRuntimeSettings {
   contextEnabled: boolean
   desktopActionsEnabled: boolean
   approvalsEnabled: boolean
+  character: {
+    enabled: boolean
+    characterJson: string
+    override: SanitizedBonziCharacterOverride | null
+  }
 }
 
 export interface OptionalPluginCatalogEntry {
@@ -51,6 +89,7 @@ export interface PersistedSettingsFileV2 {
   schemaVersion: 2
   plugins: Record<string, PersistedPluginRecord>
   approvalsEnabled?: boolean
+  character?: PersistedCharacterSettings
 }
 
 export interface PersistedSettingsFileLegacy {
@@ -65,11 +104,20 @@ export type NormalizedPluginInventory = Record<string, PersistedPluginRecord>
 export interface LoadedSettingsState {
   inventory: NormalizedPluginInventory
   approvalsEnabled: boolean
+  characterSettings: NormalizedCharacterSettings
   needsRewrite: boolean
   fileExisted: boolean
 }
 
 export const SETTINGS_FILE_NAME = 'bonzi-settings.json'
+
+export const DEFAULT_CHARACTER_SETTINGS: NormalizedCharacterSettings = {
+  enabled: false,
+  characterJson: '{}',
+  defaultCharacterJson: '{}',
+  warnings: [],
+  override: null
+}
 
 export const OPTIONAL_PLUGIN_CATALOG = [
   {
@@ -93,7 +141,12 @@ export const OPTIONAL_PLUGIN_CATALOG = [
 export const DEFAULT_PLUGIN_RUNTIME_SETTINGS: BonziElizaPluginRuntimeSettings = {
   contextEnabled: true,
   desktopActionsEnabled: true,
-  approvalsEnabled: true
+  approvalsEnabled: true,
+  character: {
+    enabled: DEFAULT_CHARACTER_SETTINGS.enabled,
+    characterJson: DEFAULT_CHARACTER_SETTINGS.characterJson,
+    override: DEFAULT_CHARACTER_SETTINGS.override
+  }
 }
 
 export const PROVIDER_PACKAGE_NAMES: Record<AssistantProviderInfo['kind'], string> = {

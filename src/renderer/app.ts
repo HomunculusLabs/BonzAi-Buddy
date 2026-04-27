@@ -44,6 +44,7 @@ export function renderApp(root: HTMLDivElement): void {
     chatInputEl,
     assistantSendButton,
     settingsPanelEl,
+    characterSettingsEl,
     approvalSettingsEl,
     pluginSettingsEl,
     settingsStatusEl,
@@ -118,6 +119,7 @@ export function renderApp(root: HTMLDivElement): void {
       settingsButton,
       settingsCloseButton,
       settingsPanelEl,
+      characterSettingsEl,
       approvalSettingsEl,
       pluginSettingsEl,
       settingsStatusEl,
@@ -431,10 +433,13 @@ export function renderApp(root: HTMLDivElement): void {
       )
     }
 
-    await settingsPanelController.hydratePluginSettings({
-      preserveStatus: true,
-      fallbackToSavedSettings: false
-    })
+    await Promise.all([
+      settingsPanelController.hydrateCharacterSettings(),
+      settingsPanelController.hydratePluginSettings({
+        preserveStatus: true,
+        fallbackToSavedSettings: false
+      })
+    ])
 
     if (
       conversationController.getEntryCount() === 0 &&

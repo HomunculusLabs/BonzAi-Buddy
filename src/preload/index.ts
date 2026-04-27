@@ -60,7 +60,11 @@ const bonziApi = {
     getRuntimeApprovalSettings: () =>
       invoke(IPC_CHANNELS.settings.getRuntimeApprovalSettings),
     updateRuntimeApprovalSettings: (request) =>
-      invoke(IPC_CHANNELS.settings.updateRuntimeApprovalSettings, request)
+      invoke(IPC_CHANNELS.settings.updateRuntimeApprovalSettings, request),
+    getElizaCharacterSettings: () =>
+      invoke(IPC_CHANNELS.settings.getElizaCharacterSettings),
+    updateElizaCharacterSettings: (request) =>
+      invoke(IPC_CHANNELS.settings.updateElizaCharacterSettings, request)
   },
   plugins: {
     discover: (request) => invoke(IPC_CHANNELS.plugins.discover, request),

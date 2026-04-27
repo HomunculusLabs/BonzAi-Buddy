@@ -19,12 +19,17 @@ import {
   type PersistedPluginRecord,
   type PersistedSettingsFileLegacy
 } from './plugin-settings-model'
+import {
+  getDefaultCharacterSettings,
+  normalizePersistedCharacterSettings
+} from './character-settings-validation'
 
 export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
   if (!isRecord(parsed)) {
     return {
       inventory: {},
       approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
+      characterSettings: getDefaultCharacterSettings(),
       needsRewrite: true,
       fileExisted: true
     }
@@ -37,6 +42,7 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
       return {
         inventory: {},
         approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
+        characterSettings: getDefaultCharacterSettings(),
         needsRewrite: true,
         fileExisted: true
       }
@@ -50,6 +56,11 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
         : DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled
 
     if (typeof parsed.approvalsEnabled !== 'boolean') {
+      needsRewrite = true
+    }
+
+    const normalizedCharacter = normalizePersistedCharacterSettings(parsed.character)
+    if (normalizedCharacter.needsRewrite) {
       needsRewrite = true
     }
 
@@ -81,6 +92,7 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
     return {
       inventory,
       approvalsEnabled,
+      characterSettings: normalizedCharacter.settings,
       needsRewrite,
       fileExisted: true
     }
@@ -90,6 +102,7 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
     return {
       inventory: migrateLegacyInventory(parsed),
       approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
+      characterSettings: getDefaultCharacterSettings(),
       needsRewrite: true,
       fileExisted: true
     }
@@ -98,6 +111,7 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
   return {
     inventory: {},
     approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
+    characterSettings: getDefaultCharacterSettings(),
     needsRewrite: true,
     fileExisted: true
   }

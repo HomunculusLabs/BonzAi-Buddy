@@ -9,7 +9,12 @@ import {
 } from 'node:http'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { test, expect, _electron as electron } from '@playwright/test'
+import {
+  test,
+  expect,
+  _electron as electron,
+  type Locator
+} from '@playwright/test'
 
 interface RecordedRequest {
   headers: IncomingHttpHeaders
@@ -689,6 +694,166 @@ test('discovers plugins from registry endpoint via preload bridge', async () => 
   }
 })
 
+test('saves custom Eliza character JSON, reloads runtime, and rejects malformed drafts', async () => {
+  const upstream = await startFakeOpenAiUpstream()
+  const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-character-'))
+  const env = {
+    ...process.env,
+    BONZI_ASSISTANT_PROVIDER: 'openai-compatible',
+    BONZI_OPENAI_API_KEY: 'test-chat-key',
+    BONZI_OPENAI_BASE_URL: `${upstream.baseUrl}/v1`,
+    BONZI_OPENAI_MODEL: 'fake-chat-model',
+    BONZI_OPENAI_EMBEDDING_DIMENSIONS: '1536',
+    BONZI_EMBEDDINGS_UPSTREAM_URL: `${upstream.baseUrl}/v1`,
+    BONZI_EMBEDDINGS_UPSTREAM_MODEL: 'text-embedding-test',
+    BONZI_EMBEDDINGS_UPSTREAM_API_KEY: 'test-embedding-key',
+    BONZI_DISABLE_GPU: '1',
+    BONZI_OPAQUE_WINDOW: '1',
+    BONZI_DISABLE_VRM: '1',
+    BONZI_USER_DATA_DIR: userDataDir
+  }
+  delete env.ELECTRON_RENDERER_URL
+
+  const app = await electron.launch({
+    args: [join(process.cwd(), 'out/main/index.js')],
+    env
+  })
+
+  try {
+    const window = await app.firstWindow()
+    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+
+    await window.locator('.stage-shell').dblclick()
+    await window.locator('[data-action="settings"]').click()
+
+    const characterSection = window.locator('[data-character-settings]')
+    await expect(characterSection).toBeVisible()
+    await expect(characterSection.locator('[data-character-name]')).toHaveValue(
+      'Bonzi'
+    )
+    await expect(characterSection.locator('[data-character-system]')).toHaveValue(
+      /You are Bonzi/
+    )
+    await expect(characterSection.locator('[data-character-bio]')).toHaveValue(
+      /desktop companion assistant/
+    )
+    await expect(characterSection.locator('[data-character-message-examples]')).toHaveValue(
+      '[]'
+    )
+    await expect(characterSection.locator('[data-character-json]')).toHaveValue(
+      /"name": "Bonzi"/
+    )
+    await expect(characterSection.locator('[data-character-json]')).toHaveValue(
+      /"system": "You are Bonzi/
+    )
+    await expect(characterSection.locator('[data-character-json]')).toHaveValue(
+      /"topics": \[\]/
+    )
+
+    const marker = 'E2E_CUSTOM_CHARACTER_SYSTEM_MARKER'
+
+    await characterSection.locator('[data-character-enabled]').check()
+    await characterSection.locator('[data-character-name]').fill('E2E Custom Bonzi')
+    await setTextareaValue(characterSection.locator('[data-character-system]'), marker)
+    await setTextareaValue(
+      characterSection.locator('[data-character-topics]'),
+      'desktop helpers\ne2e topic'
+    )
+    await setTextareaValue(
+      characterSection.locator('[data-character-style-chat]'),
+      'keep replies concise'
+    )
+    await characterSection.locator('[data-character-save]').click()
+
+    await expect(window.locator('[data-settings-status]')).toContainText(
+      'Saved Eliza character settings'
+    )
+    const applyRuntimeChanges = window.locator(
+      '[data-action="apply-runtime-changes"]'
+    )
+    await expect(applyRuntimeChanges).toBeVisible()
+
+    const persistedAfterSave = JSON.parse(
+      await readFile(join(userDataDir, 'bonzi-settings.json'), 'utf8')
+    ) as {
+      schemaVersion?: number
+      character?: { enabled?: boolean; characterJson?: string }
+    }
+
+    expect(persistedAfterSave.schemaVersion).toBe(2)
+    expect(persistedAfterSave.character?.enabled).toBe(true)
+    const persistedCharacterJson = JSON.parse(
+      persistedAfterSave.character?.characterJson ?? '{}'
+    ) as {
+      name?: string
+      system?: string
+      topics?: string[]
+      style?: { chat?: string[] }
+    }
+    expect(persistedCharacterJson.name).toBe('E2E Custom Bonzi')
+    expect(persistedCharacterJson.system).toBe(marker)
+    expect(persistedCharacterJson.topics).toEqual(['desktop helpers', 'e2e topic'])
+    expect(persistedCharacterJson.style?.chat).toEqual(['keep replies concise'])
+
+    await applyRuntimeChanges.click()
+    await expect(window.locator('[data-settings-status]')).toContainText(
+      'Runtime reload complete.'
+    )
+    await expect(applyRuntimeChanges).toBeHidden()
+
+    upstream.chatRequests.length = 0
+    const response = await window.evaluate(() =>
+      window.bonzi.assistant.sendCommand({ command: 'character marker e2e' })
+    )
+    expect(response.ok).toBe(true)
+    await expect
+      .poll(() => serializedRequestBodies(upstream.chatRequests))
+      .toContain(marker)
+
+    await setTextareaValue(characterSection.locator('[data-character-json]'), '{')
+    await characterSection.locator('[data-character-save]').click()
+    await expect(window.locator('[data-settings-status]')).toContainText(
+      'Failed to save Eliza character settings'
+    )
+    await expect(characterSection.locator('[data-character-json]')).toHaveValue('{')
+
+    const persistedAfterInvalidSave = JSON.parse(
+      await readFile(join(userDataDir, 'bonzi-settings.json'), 'utf8')
+    ) as {
+      character?: { enabled?: boolean; characterJson?: string }
+    }
+
+    expect(persistedAfterInvalidSave.character?.enabled).toBe(true)
+    expect(persistedAfterInvalidSave.character?.characterJson).toBe(
+      persistedAfterSave.character?.characterJson
+    )
+
+    await characterSection.locator('[data-character-reset]').click()
+    await expect(window.locator('[data-settings-status]')).toContainText(
+      'Saved Eliza character settings'
+    )
+    await expect(characterSection.locator('[data-character-name]')).toHaveValue(
+      'Bonzi'
+    )
+    await expect(characterSection.locator('[data-character-json]')).toHaveValue(
+      /\"name\": \"Bonzi\"/
+    )
+
+    const persistedAfterReset = JSON.parse(
+      await readFile(join(userDataDir, 'bonzi-settings.json'), 'utf8')
+    ) as {
+      character?: { enabled?: boolean; characterJson?: string }
+    }
+
+    expect(persistedAfterReset.character?.enabled).toBe(false)
+    expect(persistedAfterReset.character?.characterJson).toBe('{}')
+  } finally {
+    await app.close()
+    await upstream.close()
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
 test('routes live embedding requests through the managed embeddings proxy', async () => {
   const upstream = await startFakeOpenAiUpstream()
   const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-embed-'))
@@ -950,6 +1115,14 @@ async function startFakeOpenAiUpstream(): Promise<FakeOpenAiUpstream> {
     embeddingsRequests,
     close: () => closeServer(server)
   }
+}
+
+async function setTextareaValue(locator: Locator, value: string): Promise<void> {
+  await locator.evaluate((element, nextValue) => {
+    const textarea = element as HTMLTextAreaElement
+    textarea.value = nextValue
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+  }, value)
 }
 
 function serializedRequestBodies(requests: RecordedRequest[]): string {

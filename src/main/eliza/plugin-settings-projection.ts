@@ -10,6 +10,7 @@ import {
   OPTIONAL_PLUGIN_CATALOG,
   PROVIDER_PACKAGE_NAMES,
   type BonziElizaPluginRuntimeSettings,
+  type NormalizedCharacterSettings,
   type NormalizedPluginInventory,
   type OptionalPluginCatalogEntry,
   type PersistedPluginRecord
@@ -95,8 +96,9 @@ export function buildPluginSettings(input: {
 export function buildRuntimeSettings(input: {
   inventory: NormalizedPluginInventory
   approvalsEnabled: boolean
+  characterSettings: NormalizedCharacterSettings
 }): BonziElizaPluginRuntimeSettings {
-  const { inventory, approvalsEnabled } = input
+  const { inventory, approvalsEnabled, characterSettings } = input
 
   return {
     contextEnabled:
@@ -105,7 +107,12 @@ export function buildRuntimeSettings(input: {
     desktopActionsEnabled:
       inventory['bonzi-desktop-actions']?.enabled ??
       DEFAULT_PLUGIN_RUNTIME_SETTINGS.desktopActionsEnabled,
-    approvalsEnabled
+    approvalsEnabled,
+    character: {
+      enabled: characterSettings.enabled,
+      characterJson: characterSettings.characterJson,
+      override: characterSettings.override
+    }
   }
 }
 
