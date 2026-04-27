@@ -72,8 +72,11 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
               aria-controls="settings-pane-general"
               aria-selected="true"
             >
-              <span>General</span>
-              <small>Buddy</small>
+              <span class="settings-panel__tab-icon" aria-hidden="true">⚙️</span>
+              <span class="settings-panel__tab-copy">
+                <span class="settings-panel__tab-label">General</span>
+                <small>Buddy</small>
+              </span>
             </button>
             <button
               class="settings-panel__tab"
@@ -85,8 +88,11 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
               aria-selected="false"
               tabindex="-1"
             >
-              <span>Approvals</span>
-              <small>Autonomy</small>
+              <span class="settings-panel__tab-icon" aria-hidden="true">🛡️</span>
+              <span class="settings-panel__tab-copy">
+                <span class="settings-panel__tab-label">Approvals</span>
+                <small>Autonomy</small>
+              </span>
             </button>
             <button
               class="settings-panel__tab"
@@ -98,8 +104,11 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
               aria-selected="false"
               tabindex="-1"
             >
-              <span>Character</span>
-              <small>Eliza JSON</small>
+              <span class="settings-panel__tab-icon" aria-hidden="true">🎭</span>
+              <span class="settings-panel__tab-copy">
+                <span class="settings-panel__tab-label">Character</span>
+                <small>Eliza JSON</small>
+              </span>
             </button>
             <button
               class="settings-panel__tab"
@@ -111,8 +120,11 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
               aria-selected="false"
               tabindex="-1"
             >
-              <span>Plugins</span>
-              <small>Runtime</small>
+              <span class="settings-panel__tab-icon" aria-hidden="true">🧩</span>
+              <span class="settings-panel__tab-copy">
+                <span class="settings-panel__tab-label">Plugins</span>
+                <small>Runtime</small>
+              </span>
             </button>
           </nav>
 

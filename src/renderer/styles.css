@@ -302,9 +302,8 @@ p {
 
 .settings-panel__tab {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
+  align-items: center;
+  gap: 10px;
   min-height: 56px;
   padding: 10px 12px;
   border: 1px solid transparent;
@@ -315,7 +314,26 @@ p {
   cursor: pointer;
 }
 
-.settings-panel__tab span {
+.settings-panel__tab-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 1rem;
+}
+
+.settings-panel__tab-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.settings-panel__tab-label {
   font-size: 0.86rem;
   font-weight: 900;
 }
@@ -854,15 +872,46 @@ p {
   }
 
   .settings-panel__nav {
-    flex-direction: row;
-    overflow-x: auto;
-    padding: 12px;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    overflow-x: visible;
+    padding: 10px;
     border-right: 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   }
 
   .settings-panel__tab {
-    min-width: 132px;
+    min-width: 0;
+    min-height: 58px;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px 4px;
+    text-align: center;
+  }
+
+  .settings-panel__tab-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 11px;
+    font-size: 0.96rem;
+  }
+
+  .settings-panel__tab-copy {
+    align-items: center;
+    gap: 1px;
+  }
+
+  .settings-panel__tab-label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.68rem;
+    line-height: 1.05;
+  }
+
+  .settings-panel__tab small {
+    display: none;
   }
 
   .settings-panel__tab[aria-selected='true'] {
