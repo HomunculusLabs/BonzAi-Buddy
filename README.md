@@ -32,6 +32,7 @@ Bonzi now runs an embedded **Eliza runtime** in the Electron main process. The r
 - `bun run typecheck` — TypeScript checks for main/preload/renderer
 - `bun run build` — production build via `electron-vite`
 - `bun run preview` — preview built app
+- `bun run test:e2e` — build the app and run the Playwright Electron smoke tests
 - `bun run embeddings:check` — probe the configured Bonzi-managed embeddings upstream and verify the returned dimension matches Bonzi/Eliza expectations
 - `./scripts/run-local-embeddings-server.sh` — create/update a local Python venv and start the repo-local OpenAI-compatible embeddings server on port `8999` by default
 
@@ -40,20 +41,43 @@ Bonzi now runs an embedded **Eliza runtime** in the Electron main process. The r
 - Electron main owns one Eliza `AgentRuntime` (`src/main/eliza/runtime-manager.ts`).
 - Runtime conversation history is persisted through `@elizaos/plugin-localdb`.
 - Renderer hydrates chat from `assistant:get-history` and listens to `assistant:event`.
+- Runtime settings cover plugins, action approvals, continuation limits, and character overrides (`src/main/eliza/plugin-settings.ts`).
+- Workflow runs are tracked separately from chat history so multi-step runtime/plugin actions can expose progress, approval waits, cancellation, and continuation state (`src/main/eliza/workflow-manager.ts`).
 - Desktop actions remain Bonzi-owned and confirmation-aware (`src/main/assistant.ts`), not direct unrestricted runtime execution.
 - Bonzi does **not** run the full Eliza API server or adopt stock app-companion UI in this migration phase.
 
-## Conversation history persistence
+## Local persistence
 
-History is runtime-backed and stored under Electron user data:
+Bonzi stores runtime data under Electron user data. On macOS this is typically:
 
-- `<app.getPath("userData")>/eliza-localdb`
+- `~/Library/Application Support/bonzi/`
 
-On macOS this is typically under:
+Important files/directories:
 
-- `~/Library/Application Support/bonzi/eliza-localdb`
+- `eliza-localdb/` — Eliza local database used for conversation history and runtime memory.
+- `bonzi-settings.json` — Bonzi runtime settings: plugin inventory, enabled/disabled state, approval settings, continuation limits, and character overrides.
+- `bonzi-workflow-runs.json` — recent workflow run snapshots and step status.
 
-The renderer loads persisted history on startup. Action chips are still turn-local and not persisted.
+The renderer loads persisted chat history and recent workflow state on startup. Action chips for ordinary one-turn actions remain turn-local unless they are part of a persisted workflow run.
+
+## Settings panel
+
+The renderer settings panel is split into runtime-focused sections:
+
+- **Plugins** — shows required plugins (`localdb`, provider), Bonzi built-ins (`bonzi-context`, `bonzi-desktop-actions`), and discovered registry/local/installed plugins. Third-party installs run through a user-data plugin workspace and require explicit confirmation before `bun add`; installed plugins are saved disabled by default.
+- **Action approvals** — controls whether runtime/plugin actions need approval prompts. Disabling approvals requires an explicit confirmation flag, and actions still stay inside Bonzi's allowlist.
+- **Continuation pacing** — controls multi-step continuation limits: max steps, max runtime, and post-action delay.
+- **Character editor** — lets the user override safe Eliza character fields such as identity, system prompt, bio, lore/memory, topics, adjectives, and style. Unsupported runtime fields such as plugins, actions, providers, secrets, and embedded knowledge sources are rejected.
+- **Knowledge import** — imports Markdown files into elizaOS runtime memory/RAG. The renderer reads selected `.md` files as text and sends them over IPC; paths and imported Markdown are not saved in Bonzi settings.
+
+Knowledge import limits are enforced in both renderer and main:
+
+- up to 20 Markdown files per import
+- max 1 MiB per file
+- max 5 MiB total request size
+- max 500 generated chunks per import
+
+Markdown is normalized, split by headings/paragraphs where possible, and each chunk is tagged with its source filename before import.
 
 ## Provider mapping / env behavior
 
@@ -231,6 +255,25 @@ Supported model examples:
 - `GLM-4.7`
 - `GLM-4.5-air`
 
+## Vision settings
+
+Discord screenshot reading uses `src/main/vision-client.ts`. By default Bonzi delegates image understanding to the local `pi` CLI so it can reuse an existing pi provider/profile. Set these env vars when needed:
+
+```env
+BONZI_VISION_USE_PI=1
+# BONZI_VISION_PI_COMMAND=/absolute/path/to/pi
+# BONZI_VISION_PI_MODEL=openai-codex/gpt-5.5
+BONZI_VISION_TIMEOUT_MS=120000
+```
+
+Set `BONZI_VISION_USE_PI=0` to use a direct OpenAI-compatible Responses API call instead:
+
+```env
+BONZI_VISION_BASE_URL=https://api.openai.com/v1
+BONZI_VISION_MODEL=chatgpt-5.5
+BONZI_VISION_API_KEY=your-api-key
+```
+
 ## Supported built-in emotes and action model
 
 Current built-in runtime emotes:
@@ -244,8 +287,16 @@ Current allowlisted desktop actions:
 - `copy-vrm-asset-path`
 - `minimize-window`
 - `close-window` (confirmation required)
+- `open-url` (HTTP/HTTPS only; embedded credentials and invalid URLs rejected)
+- `search-web`
+- `cua-check-status`
+- `discord-snapshot`
+- `discord-read-context`
+- `discord-read-screenshot`
+- `discord-scroll`
+- `discord-type-draft`
 
-Action flow remains: runtime proposes action metadata → main process validates/normalizes → renderer shows action chip → user confirms where required → main executes allowlisted action.
+Action flow remains: runtime proposes action metadata → main process validates/normalizes → renderer shows action chip or workflow step → user confirms where required → main executes allowlisted action. Workflow actions can pause in `awaiting_approval` or `awaiting_external_action`, emit status updates, and continue after an action completes.
 
 ## VRM asset behavior
 
@@ -316,8 +367,18 @@ We cannot automate Adobe login or asset downloads, but Bonzi can use Mixamo FBX 
 
 - Assistant output is normalized to a JSON envelope.
 - Action proposals are filtered to a strict allowlist.
-- `close-window` requires explicit confirmation before execution.
+- Runtime/plugin workflow steps are persisted and can be approved, rejected, cancelled, completed, or failed explicitly.
+- `close-window` always requires explicit confirmation before execution.
+- Third-party plugin installation requires a confirmation round-trip; installs use the user-data plugin workspace and plugin scripts are disabled by default unless explicitly allowed.
+- URL-opening actions only accept safe HTTP/HTTPS URLs.
+- Markdown knowledge import is size/type limited and does not persist source file paths in settings.
 - No unrestricted shell command execution is exposed in preload/main IPC.
+
+## Testing
+
+- `bun run typecheck` verifies main/preload/renderer TypeScript projects.
+- `bun run test:e2e` builds the app and runs Playwright tests in `tests/e2e`.
+- `bun run embeddings:check` validates the configured embedding upstream before launching the runtime.
 
 ## macOS desktop notes
 
