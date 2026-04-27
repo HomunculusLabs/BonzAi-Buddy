@@ -888,7 +888,7 @@ p {
   .settings-panel__nav {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 6px;
+    gap: 8px;
     overflow-x: visible;
     padding: 10px;
     border-right: 0;
@@ -897,35 +897,31 @@ p {
 
   .settings-panel__tab {
     min-width: 0;
-    min-height: 58px;
+    min-height: 54px;
     justify-content: center;
-    gap: 4px;
-    padding: 8px 4px;
+    padding: 8px;
     text-align: center;
   }
 
   .settings-panel__tab-icon {
-    width: 28px;
-    height: 28px;
-    border-radius: 11px;
-    font-size: 0.96rem;
+    width: 34px;
+    height: 34px;
+    border-radius: 13px;
+  }
+
+  .settings-panel__tab-icon svg {
+    width: 18px;
+    height: 18px;
   }
 
   .settings-panel__tab-copy {
-    align-items: center;
-    gap: 1px;
-  }
-
-  .settings-panel__tab-label {
-    max-width: 100%;
+    position: absolute;
+    width: 1px;
+    height: 1px;
     overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 0.68rem;
-    line-height: 1.05;
-  }
-
-  .settings-panel__tab small {
-    display: none;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 
   .settings-panel__tab[aria-selected='true'] {
@@ -1081,6 +1077,7 @@ p {
   color: rgba(38, 29, 66, 0.96);
   box-shadow: none;
   pointer-events: auto;
+  cursor: pointer;
 }
 
 .shell:not(.shell--bubble-visible) .speech-bubble {
@@ -1340,6 +1337,7 @@ p {
 }
 
 .speech-bubble .ghost-button {
+  cursor: pointer;
   color: rgba(48, 37, 88, 0.94);
   background: rgba(255, 255, 255, 0.64);
   border-color: rgba(93, 72, 163, 0.18);
