@@ -46,6 +46,21 @@ export interface SettingsPanelControllerOptions {
   onConversationNeedsRender(): void
 }
 
+type SettingsTabId = 'general' | 'approvals' | 'character' | 'plugins'
+
+const SETTINGS_TAB_IDS: SettingsTabId[] = [
+  'general',
+  'approvals',
+  'character',
+  'plugins'
+]
+
+function normalizeSettingsTabId(value: string | undefined): SettingsTabId {
+  return SETTINGS_TAB_IDS.includes(value as SettingsTabId)
+    ? (value as SettingsTabId)
+    : 'general'
+}
+
 export function createSettingsPanelController(
   options: SettingsPanelControllerOptions
 ): SettingsPanelController {
@@ -62,6 +77,14 @@ export function createSettingsPanelController(
   } = options.elements
 
   let isSettingsVisible = false
+  let activeSettingsTab: SettingsTabId = 'general'
+
+  const tabButtons = Array.from(
+    settingsPanelEl.querySelectorAll<HTMLButtonElement>('[data-settings-tab]')
+  )
+  const tabPanes = Array.from(
+    settingsPanelEl.querySelectorAll<HTMLElement>('[data-settings-pane]')
+  )
 
   const statusController = createSettingsStatusController({
     settingsStatusEl,
@@ -94,6 +117,97 @@ export function createSettingsPanelController(
     onSavingChange: statusController.setPluginSaving
   })
 
+  const setActiveSettingsTab = (
+    tabId: SettingsTabId,
+    tabOptions: { focus?: boolean } = {}
+  ): void => {
+    activeSettingsTab = tabId
+
+    for (const button of tabButtons) {
+      const buttonTabId = normalizeSettingsTabId(button.dataset.settingsTab)
+      const isSelected = buttonTabId === activeSettingsTab
+      button.setAttribute('aria-selected', String(isSelected))
+      button.tabIndex = isSelected ? 0 : -1
+
+      if (isSelected && tabOptions.focus) {
+        button.focus()
+      }
+    }
+
+    for (const pane of tabPanes) {
+      const paneTabId = normalizeSettingsTabId(pane.dataset.settingsPane)
+      pane.hidden = paneTabId !== activeSettingsTab
+    }
+  }
+
+  const focusActiveTabSoon = (): void => {
+    window.requestAnimationFrame(() => {
+      if (!isSettingsVisible) {
+        return
+      }
+
+      setActiveSettingsTab(activeSettingsTab, { focus: true })
+    })
+  }
+
+  const handleSettingsTabClick = (event: MouseEvent): void => {
+    const target = event.target
+
+    if (!(target instanceof HTMLElement)) {
+      return
+    }
+
+    const tabButton = target.closest<HTMLButtonElement>('[data-settings-tab]')
+
+    if (!tabButton) {
+      return
+    }
+
+    setActiveSettingsTab(normalizeSettingsTabId(tabButton.dataset.settingsTab), {
+      focus: true
+    })
+  }
+
+  const handleSettingsTabKeydown = (event: KeyboardEvent): void => {
+    const target = event.target
+
+    if (!(target instanceof HTMLButtonElement) || !target.matches('[data-settings-tab]')) {
+      return
+    }
+
+    const currentIndex = tabButtons.indexOf(target)
+    if (currentIndex < 0) {
+      return
+    }
+
+    let nextIndex: number | null = null
+
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        nextIndex = (currentIndex + 1) % tabButtons.length
+        break
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        nextIndex = (currentIndex - 1 + tabButtons.length) % tabButtons.length
+        break
+      case 'Home':
+        nextIndex = 0
+        break
+      case 'End':
+        nextIndex = tabButtons.length - 1
+        break
+      default:
+        return
+    }
+
+    event.preventDefault()
+    const nextButton = tabButtons[nextIndex]
+    setActiveSettingsTab(normalizeSettingsTabId(nextButton.dataset.settingsTab), {
+      focus: true
+    })
+  }
+
   const setSettingsVisible = (
     visible: boolean,
     openOptions: { notifyOpen?: boolean } = {}
@@ -107,6 +221,8 @@ export function createSettingsPanelController(
     shellEl.classList.toggle('shell--settings-open', visible)
 
     if (visible) {
+      setActiveSettingsTab(activeSettingsTab)
+      focusActiveTabSoon()
       void approvalController.hydrateApprovalSettings()
       void characterController.hydrate()
       void pluginController.hydrate()
@@ -143,8 +259,11 @@ export function createSettingsPanelController(
     }
   }
 
+  setActiveSettingsTab(activeSettingsTab)
   settingsButton.addEventListener('click', handleSettingsButtonClick)
   settingsCloseButton.addEventListener('click', handleSettingsCloseButtonClick)
+  settingsPanelEl.addEventListener('click', handleSettingsTabClick)
+  settingsPanelEl.addEventListener('keydown', handleSettingsTabKeydown)
   applyRuntimeChangesButton.addEventListener(
     'click',
     handleApplyRuntimeChangesClick
@@ -166,6 +285,8 @@ export function createSettingsPanelController(
     dispose: () => {
       settingsButton.removeEventListener('click', handleSettingsButtonClick)
       settingsCloseButton.removeEventListener('click', handleSettingsCloseButtonClick)
+      settingsPanelEl.removeEventListener('click', handleSettingsTabClick)
+      settingsPanelEl.removeEventListener('keydown', handleSettingsTabKeydown)
       applyRuntimeChangesButton.removeEventListener(
         'click',
         handleApplyRuntimeChangesClick

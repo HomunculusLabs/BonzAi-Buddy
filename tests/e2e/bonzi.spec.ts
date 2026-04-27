@@ -664,8 +664,26 @@ test('discovers plugins from registry endpoint via preload bridge', async () => 
       'Registry marked this plugin as incompatible.'
     )
 
+    const generatedMattermost = discovered.availablePlugins.find(
+      (plugin) => plugin.id === '@bealers/plugin-mattermost'
+    )
+    expect(generatedMattermost).toBeDefined()
+    expect(generatedMattermost?.packageName).toBe('@bealers/plugin-mattermost')
+    expect(generatedMattermost?.version).toBe('0.5.1')
+    expect(generatedMattermost?.description).toBe(
+      'Mattermost client plugin for ElizaOS - enables AI agent integration with Mattermost chat platforms'
+    )
+    expect(generatedMattermost?.lifecycleStatus).toBe('available')
+    expect(generatedMattermost?.warnings ?? []).not.toContain(
+      'Registry marked this plugin as incompatible.'
+    )
+    expect(generatedMattermost?.warnings ?? []).not.toContain(
+      'Registry entry did not include a description.'
+    )
+
     await window.locator('.stage-shell').dblclick()
     await window.locator('[data-action="settings"]').click()
+    await window.locator('[data-settings-tab="plugins"]').click()
     const weatherDiscoverRow = window.locator(
       '[data-plugin-id="weather"][data-plugin-available="true"]'
     )
@@ -676,7 +694,7 @@ test('discovers plugins from registry endpoint via preload bridge', async () => 
 
     const cache = JSON.parse(
       await readFile(
-        join(userDataDir, 'eliza-plugin-registry-cache.v1.json'),
+        join(userDataDir, 'eliza-plugin-registry-cache.v2.json'),
         'utf8'
       )
     ) as {
@@ -684,7 +702,7 @@ test('discovers plugins from registry endpoint via preload bridge', async () => 
       entries?: unknown[]
     }
 
-    expect(cache.schemaVersion).toBe(1)
+    expect(cache.schemaVersion).toBe(2)
     expect(Array.isArray(cache.entries)).toBe(true)
     expect(registry.requests).toBeGreaterThan(0)
   } finally {
@@ -738,7 +756,7 @@ test('saves custom Eliza character JSON, reloads runtime, and rejects malformed 
       /desktop companion assistant/
     )
     await expect(characterSection.locator('[data-character-message-examples]')).toHaveValue(
-      '[]'
+      /Can you search the web for cute jellyfish facts/
     )
     await expect(characterSection.locator('[data-character-json]')).toHaveValue(
       /"name": "Bonzi"/
@@ -747,7 +765,10 @@ test('saves custom Eliza character JSON, reloads runtime, and rejects malformed 
       /"system": "You are Bonzi/
     )
     await expect(characterSection.locator('[data-character-json]')).toHaveValue(
-      /"topics": \[\]/
+      /"topics": \[/
+    )
+    await expect(characterSection.locator('[data-character-json]')).toHaveValue(
+      /desktop assistance/
     )
 
     const marker = 'E2E_CUSTOM_CHARACTER_SYSTEM_MARKER'
@@ -988,6 +1009,36 @@ async function startFakePluginRegistry(): Promise<FakePluginRegistry> {
             compatibility: {
               compatible: false
             }
+          },
+          {
+            id: '@bealers/plugin-mattermost',
+            git: {
+              repo: 'bealers/plugin-mattermost',
+              v0: { version: 'v0.5.0' },
+              v1: { version: null },
+              alpha: { version: null }
+            },
+            npm: {
+              repo: '@bealers/plugin-mattermost',
+              v0: '0.5.1',
+              description:
+                'Mattermost client plugin for ElizaOS - enables AI agent integration with Mattermost chat platforms',
+              v1: null,
+              alpha: null,
+              v0CoreRange: 'latest',
+              v1CoreRange: null,
+              alphaCoreRange: null
+            },
+            supports: {
+              v0: false,
+              v1: false,
+              alpha: false
+            },
+            description: null,
+            homepage: null,
+            topics: [],
+            stargazers_count: 0,
+            language: 'TypeScript'
           }
         ]
       })

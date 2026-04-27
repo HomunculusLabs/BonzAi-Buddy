@@ -41,20 +41,20 @@ export function createApprovalSettingsController(
             : 'Actions, workflows, and plugin operations that would normally ask approval continue automatically.'}
         </p>
       </div>
-      <label class="plugin-row approval-settings-row">
-        <span class="plugin-row__copy">
-          <span class="plugin-row__title">
+      <label class="settings-toggle-card approval-settings-row">
+        <span class="settings-toggle-card__copy">
+          <span class="settings-toggle-card__title">
             Bonzi approvals
-            <span class="plugin-row__status">${approvalsEnabled ? 'Enabled' : 'Autonomous'}</span>
+            <span class="settings-badge">${approvalsEnabled ? 'Enabled' : 'Autonomous'}</span>
           </span>
-          <span class="plugin-row__description">
+          <span class="settings-toggle-card__description">
             Turn this off for more autonomy. Disabling requires explicit confirmation once.
           </span>
         </span>
-        <span class="plugin-row__action-group">
+        <span class="settings-toggle-card__actions">
           <span>${approvalsEnabled ? 'On' : 'Off'}</span>
           <input
-            class="plugin-row__toggle"
+            class="settings-toggle-card__toggle"
             type="checkbox"
             data-approval-toggle
             ${approvalsEnabled ? 'checked' : ''}

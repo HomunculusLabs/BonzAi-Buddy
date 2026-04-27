@@ -64,10 +64,10 @@ export interface JellyfishBuddyHandle {
   dispose(): void
 }
 
-const PRIMARY_TENTACLE_COUNT = 12
+const PRIMARY_TENTACLE_COUNT = 14
 const ORAL_ARM_COUNT = 7
-const SECONDARY_FILAMENT_COUNT = 26
-const TENTACLE_SEGMENTS = 34
+const SECONDARY_FILAMENT_COUNT = 32
+const TENTACLE_SEGMENTS = 36
 const SWIM_BURST_DURATION_SECONDS = 1.18
 const DRAG_RELEASE_DURATION_SECONDS = 0.92
 const DOUBLE_CLICK_BURST_DURATION_SECONDS = 1.05
@@ -85,13 +85,17 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
     color: 0xffffff,
     depthWrite: false,
     emissive: 0x2a6fff,
-    emissiveIntensity: 0.3,
+    clearcoat: 0.08,
+    clearcoatRoughness: 0.35,
+    emissiveIntensity: 0.18,
+    ior: 1.33,
     metalness: 0,
-    opacity: 0.44,
-    roughness: 0.28,
+    opacity: 0.38,
+    roughness: 0.22,
     side: THREE.DoubleSide,
+    thickness: 0.24,
     transparent: true,
-    transmission: 0.24,
+    transmission: 0.3,
     vertexColors: true
   })
 
@@ -108,7 +112,7 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
       color: 0xdff8ff,
       depthTest: true,
       depthWrite: false,
-      opacity: 0.075,
+      opacity: 0.105,
       side: THREE.DoubleSide,
       transparent: true,
       vertexColors: true
@@ -130,7 +134,7 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
       blending: THREE.AdditiveBlending,
       color: 0xb7efff,
       depthWrite: false,
-      opacity: 0.075,
+      opacity: 0.12,
       transparent: true,
       vertexColors: true
     })
@@ -146,7 +150,7 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
       blending: THREE.AdditiveBlending,
       color: 0xffd8f2,
       depthWrite: false,
-      opacity: 0.07,
+      opacity: 0.055,
       transparent: true
     })
   )
@@ -198,14 +202,14 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
     color: 0xf1fdff,
     depthTest: true,
     depthWrite: false,
-    opacity: 0.14,
+    opacity: 0.075,
     transparent: true
   })
 
   const tentacles: JellyfishTentacle[] = []
 
   for (let index = 0; index < PRIMARY_TENTACLE_COUNT; index += 1) {
-    const angle = clusteredTentacleAngle(index, PRIMARY_TENTACLE_COUNT, 5, 0.22, 0.12)
+    const angle = clusteredTentacleAngle(index, PRIMARY_TENTACLE_COUNT, 5, 0.28, 0.12)
     const segmentCount = TENTACLE_SEGMENTS
     const positions = new Float32Array((segmentCount + 1) * 2 * 3)
     const geometry = new THREE.BufferGeometry()
@@ -220,20 +224,20 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
 
     tentacles.push({
       angle,
-      baseRadius: index % 2 === 0 ? 0.2 : 0.31,
+      baseRadius: index % 4 === 0 ? 0.16 : index % 2 === 0 ? 0.24 : 0.34,
       geometry,
-      length: index % 5 === 0 ? 1.62 : index % 3 === 0 ? 1.24 : 0.94,
+      length: index % 7 === 0 ? 1.68 : index % 5 === 0 ? 1.45 : index % 3 === 0 ? 1.18 : 0.88,
       phase: index * 0.82,
       positions,
       segmentCount,
       style: 'ribbon',
-      waveScale: 0.48 + (index % 3) * 0.08,
-      width: 0.024 + (index % 3) * 0.006
+      waveScale: 0.48 + (index % 4) * 0.07,
+      width: 0.018 + (index % 4) * 0.004
     })
   }
 
   for (let index = 0; index < ORAL_ARM_COUNT; index += 1) {
-    const angle = clusteredTentacleAngle(index, ORAL_ARM_COUNT, ORAL_ARM_COUNT, 0.18, 0.44)
+    const angle = clusteredTentacleAngle(index, ORAL_ARM_COUNT, ORAL_ARM_COUNT, 0.24, 0.44)
     const segmentCount = Math.round(TENTACLE_SEGMENTS * 0.65)
     const positions = new Float32Array((segmentCount + 1) * 2 * 3)
     const geometry = new THREE.BufferGeometry()
@@ -248,20 +252,20 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
 
     tentacles.push({
       angle,
-      baseRadius: 0.055 + (index % 2) * 0.045,
+      baseRadius: 0.035 + (index % 3) * 0.035,
       geometry,
-      length: 0.72 + (index % 3) * 0.13,
+      length: 0.62 + (index % 4) * 0.11,
       phase: index * 1.12 + 0.7,
       positions,
       segmentCount,
       style: 'oralArm',
-      waveScale: 1.12 + (index % 2) * 0.16,
-      width: 0.084 + (index % 2) * 0.022
+      waveScale: 1.08 + (index % 3) * 0.13,
+      width: 0.072 + (index % 3) * 0.016
     })
   }
 
   for (let index = 0; index < SECONDARY_FILAMENT_COUNT; index += 1) {
-    const angle = clusteredTentacleAngle(index, SECONDARY_FILAMENT_COUNT, 5, 0.32, 0.28)
+    const angle = clusteredTentacleAngle(index, SECONDARY_FILAMENT_COUNT, 5, 0.38, 0.28)
     const segmentCount = TENTACLE_SEGMENTS
     const positions = new Float32Array((segmentCount + 1) * 3)
     const geometry = new THREE.BufferGeometry()
@@ -275,14 +279,14 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
 
     tentacles.push({
       angle,
-      baseRadius: 0.31 + (index % 2) * 0.05,
+      baseRadius: index % 5 === 0 ? 0.22 : 0.32 + (index % 3) * 0.035,
       geometry,
-      length: index % 7 === 0 ? 1.72 : index % 4 === 0 ? 1.38 : 1.04,
+      length: index % 9 === 0 ? 1.92 : index % 7 === 0 ? 1.62 : index % 4 === 0 ? 1.34 : 1.02,
       phase: index * 0.58 + 0.4,
       positions,
       segmentCount,
       style: 'filament',
-      waveScale: 0.42 + (index % 3) * 0.06,
+      waveScale: 0.34 + (index % 4) * 0.05,
       width: 0
     })
   }
@@ -591,22 +595,22 @@ export function evaluateJellyfishFrame(input: {
 }
 
 function createBellGeometry(): THREE.BufferGeometry {
-  const radialSegments = 72
-  const verticalSegments = 18
+  const radialSegments = 88
+  const verticalSegments = 24
   const positions: number[] = []
   const colors: number[] = []
   const indices: number[] = []
   const topColor = new THREE.Color(0xc9f3ff)
-  const rimColor = new THREE.Color(0x74bde6)
+  const rimColor = new THREE.Color(0xb6cfff)
   const glowColor = new THREE.Color(0xf0fbff)
 
   for (let yIndex = 0; yIndex <= verticalSegments; yIndex += 1) {
     const v = yIndex / verticalSegments
     const eased = 1 - Math.pow(1 - v, 1.86)
-    const baseRadius = 0.105 + Math.pow(Math.sin(v * Math.PI * 0.5), 0.9) * 0.47
-    const shoulder = Math.sin(v * Math.PI) * 0.105
-    const rimInfluence = Math.pow(v, 4.4)
-    const y = 0.48 - eased * 0.56 + shoulder - rimInfluence * 0.035
+    const baseRadius = 0.13 + Math.pow(Math.sin(v * Math.PI * 0.52), 0.95) * 0.45
+    const shoulder = Math.sin(v * Math.PI) * 0.095
+    const rimInfluence = Math.pow(v, 4.2)
+    const y = 0.47 - eased * 0.55 + shoulder - rimInfluence * 0.048
 
     for (let radialIndex = 0; radialIndex <= radialSegments; radialIndex += 1) {
       const u = radialIndex / radialSegments
@@ -657,7 +661,7 @@ function createScallopedRimGeometry(): THREE.BufferGeometry {
   const colors: number[] = []
   const indices: number[] = []
   const innerRadius = 0.36
-  const outerRadius = 0.49
+  const outerRadius = 0.5
   const rimColor = new THREE.Color(0xc6f4ff)
   const foldColor = new THREE.Color(0x7cc9ef)
 
@@ -724,8 +728,8 @@ function createBellDetails(): { root: THREE.Group } {
     transparent: true
   })
 
-  for (let index = 0; index < 18; index += 1) {
-    const angle = (index / 18) * Math.PI * 2 + Math.sin(index * 1.7) * 0.025
+  for (let index = 0; index < 20; index += 1) {
+    const angle = (index / 20) * Math.PI * 2 + Math.sin(index * 1.7) * 0.025
     const positions: number[] = []
 
     for (let step = 0; step <= 5; step += 1) {

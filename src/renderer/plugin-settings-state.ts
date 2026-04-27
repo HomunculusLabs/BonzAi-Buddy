@@ -69,7 +69,8 @@ export function createPluginSettingsState(options: {
       ),
     render: () => {
       renderPluginSettings(pluginSettingsEl, pluginSettings, {
-        isSaving: isSavingSettings
+        isSaving: isSavingSettings,
+        pendingInstallPluginIds: new Set(pendingPluginInstallConfirmations.keys())
       })
     }
   }

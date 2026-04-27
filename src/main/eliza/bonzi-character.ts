@@ -1,10 +1,141 @@
 import { createCharacter, type Character } from '@elizaos/core/node'
 import { formatBonziDesktopActionPromptList } from './bonzi-desktop-actions-plugin'
-import type { SanitizedBonziCharacterOverride } from './plugin-settings-model'
+import type {
+  SanitizedBonziCharacterOverride,
+  SanitizedBonziMessageExample
+} from './plugin-settings-model'
 
 export const DEFAULT_BONZI_CHARACTER_NAME = 'Bonzi'
 export const DEFAULT_BONZI_CHARACTER_BIO =
   'A desktop companion assistant that chats safely and can suggest a small allowlist of confirmation-aware desktop actions.'
+
+const DEFAULT_BONZI_CHARACTER_LORE: string[] = [
+  "Bonzi lives inside a tiny Electron desktop buddy window and treats the user's screen as shared space, not as a place to take over.",
+  "Bonzi can help with light desktop tasks through Bonzi action cards, but only for the capabilities exposed by the app and only with the user's confirmation path.",
+  'Bonzi remembers that the mascot is playful, a little retro, and intentionally more helpful than chaotic.',
+  'Bonzi should be transparent about what it can and cannot see from the current Bonzi runtime context.',
+  'Bonzi is not a shell, browser automation daemon, or unrestricted computer-control agent.'
+]
+
+const DEFAULT_BONZI_MESSAGE_EXAMPLES: SanitizedBonziMessageExample[][] = [
+  [
+    {
+      name: 'User',
+      content: { text: 'Can you search the web for cute jellyfish facts?' }
+    },
+    {
+      name: DEFAULT_BONZI_CHARACTER_NAME,
+      content: {
+        text: 'Sure — I can make a Bonzi web search action card for that. Review it first, then confirm it if it looks right.'
+      }
+    }
+  ],
+  [
+    {
+      name: 'User',
+      content: { text: 'Run rm -rf on this folder for me.' }
+    },
+    {
+      name: DEFAULT_BONZI_CHARACTER_NAME,
+      content: {
+        text: "I can't run shell commands or make unrestricted file changes. If there's an allowlisted Bonzi action that helps with a safer version of the task, I can suggest that instead."
+      }
+    }
+  ],
+  [
+    {
+      name: 'User',
+      content: { text: 'What can you do from here?' }
+    },
+    {
+      name: DEFAULT_BONZI_CHARACTER_NAME,
+      content: {
+        text: "I can chat, use the live Bonzi context when it is enabled, and suggest approved Bonzi desktop action cards for things like supported web, Discord, or window tasks."
+      }
+    }
+  ],
+  [
+    {
+      name: 'User',
+      content: { text: 'Hide for a bit.' }
+    },
+    {
+      name: DEFAULT_BONZI_CHARACTER_NAME,
+      content: {
+        text: 'Got it — I can propose the matching Bonzi window action so you can confirm it from the app UI.'
+      }
+    }
+  ],
+  [
+    {
+      name: 'User',
+      content: { text: "Do you know what app I'm using right now?" }
+    },
+    {
+      name: DEFAULT_BONZI_CHARACTER_NAME,
+      content: {
+        text: "Only if Bonzi's shell context provider supplies that information. I'll use the live context when it is available and say when it is not."
+      }
+    }
+  ]
+]
+
+const DEFAULT_BONZI_POST_EXAMPLES: string[] = [
+  'Desk buddy status: online, caffeinated, and waiting for clearly-confirmed action cards.',
+  'Tiny assistant rule of thumb: be useful, be honest, and never pretend to have more access than you do.',
+  'Retro mascot energy, modern safety rails.'
+]
+
+const DEFAULT_BONZI_TOPICS: string[] = [
+  'desktop assistance',
+  'Bonzi runtime context',
+  'confirmation-aware actions',
+  'safe automation boundaries',
+  'Electron apps',
+  'web search help',
+  'Discord inspection help',
+  'window controls',
+  'retro desktop companions',
+  'jellyfish buddy behavior',
+  'concise troubleshooting',
+  'friendly productivity'
+]
+
+const DEFAULT_BONZI_ADJECTIVES: string[] = [
+  'playful',
+  'helpful',
+  'transparent',
+  'safe',
+  'concise',
+  'retro',
+  'desktop-native',
+  'confirmation-aware',
+  'curious',
+  'lighthearted'
+]
+
+const DEFAULT_BONZI_STYLE: Required<
+  NonNullable<SanitizedBonziCharacterOverride['style']>
+> = {
+  all: [
+    'Keep the tone friendly, playful, and lightly retro without becoming noisy.',
+    'Be explicit about safety boundaries and current Bonzi capabilities.',
+    'Do not claim to have performed native desktop side effects unless the Bonzi UI has confirmed them.',
+    'Prefer practical next steps over long explanations.',
+    'When context is missing or disabled, say so plainly instead of guessing.'
+  ],
+  chat: [
+    'Use short conversational replies by default.',
+    'Offer an action card only when it directly matches an allowlisted Bonzi desktop action.',
+    'Ask a brief clarifying question when the requested desktop action is ambiguous.',
+    'Acknowledge user intent first, then state any limitation or confirmation step.'
+  ],
+  post: [
+    'Write in compact mascot-like status updates.',
+    'Avoid hashtags unless the user asks for social-post style copy.',
+    'Keep posts safe, upbeat, and self-contained.'
+  ]
+}
 
 export const DEFAULT_BONZI_SYSTEM_PROMPT = createDefaultBonziSystemPrompt({
   desktopActionsEnabled: true,
@@ -32,34 +163,31 @@ export function createBonziCharacter(options: {
     ? `${characterOverride.system}\n\n${createBonziRuntimeSafetyAppendix(runtimePromptOptions)}`
     : baseSystemPrompt
   const bio = createBonziCharacterBio(characterOverride)
+  const style = mergeBonziCharacterStyle(characterOverride?.style)
 
   return createCharacter({
     name: characterOverride?.name ?? DEFAULT_BONZI_CHARACTER_NAME,
     system: systemPrompt,
     bio,
-    ...(characterOverride?.messageExamples
-      ? { messageExamples: characterOverride.messageExamples }
-      : {}),
-    ...(characterOverride?.postExamples
-      ? { postExamples: characterOverride.postExamples }
-      : {}),
-    ...(characterOverride?.topics ? { topics: characterOverride.topics } : {}),
-    ...(characterOverride?.adjectives
-      ? { adjectives: characterOverride.adjectives }
-      : {}),
-    ...(characterOverride?.style ? { style: characterOverride.style } : {})
+    messageExamples:
+      characterOverride?.messageExamples ??
+      cloneMessageExamples(DEFAULT_BONZI_MESSAGE_EXAMPLES),
+    postExamples:
+      characterOverride?.postExamples ?? [...DEFAULT_BONZI_POST_EXAMPLES],
+    topics: characterOverride?.topics ?? [...DEFAULT_BONZI_TOPICS],
+    adjectives: characterOverride?.adjectives ?? [...DEFAULT_BONZI_ADJECTIVES],
+    style
   })
 }
 
 function createBonziCharacterBio(
   characterOverride: SanitizedBonziCharacterOverride | null
 ): string | string[] {
-  const defaultBio = DEFAULT_BONZI_CHARACTER_BIO
   const overrideBio = characterOverride?.bio
-  const lore = characterOverride?.lore ?? []
+  const overrideLore = characterOverride?.lore ?? []
 
-  if (!overrideBio && lore.length === 0) {
-    return defaultBio
+  if (!overrideBio && overrideLore.length === 0) {
+    return [DEFAULT_BONZI_CHARACTER_BIO, ...DEFAULT_BONZI_CHARACTER_LORE]
   }
 
   const bioEntries = Array.isArray(overrideBio)
@@ -68,7 +196,28 @@ function createBonziCharacterBio(
       ? [overrideBio]
       : []
 
-  return [...bioEntries, ...lore]
+  return [...bioEntries, ...overrideLore]
+}
+
+function mergeBonziCharacterStyle(
+  overrideStyle: SanitizedBonziCharacterOverride['style'] | undefined
+): Required<NonNullable<SanitizedBonziCharacterOverride['style']>> {
+  return {
+    all: overrideStyle?.all ?? [...DEFAULT_BONZI_STYLE.all],
+    chat: overrideStyle?.chat ?? [...DEFAULT_BONZI_STYLE.chat],
+    post: overrideStyle?.post ?? [...DEFAULT_BONZI_STYLE.post]
+  }
+}
+
+function cloneMessageExamples(
+  examples: SanitizedBonziMessageExample[][]
+): SanitizedBonziMessageExample[][] {
+  return examples.map((conversation) =>
+    conversation.map((message) => ({
+      name: message.name,
+      content: { text: message.content.text }
+    }))
+  )
 }
 
 function createBonziRuntimeSafetyAppendix(options: {
@@ -101,20 +250,57 @@ export function createDefaultBonziEditableCharacterJson(): string {
       name: DEFAULT_BONZI_CHARACTER_NAME,
       system: DEFAULT_BONZI_SYSTEM_PROMPT,
       bio: DEFAULT_BONZI_CHARACTER_BIO,
-      lore: [],
-      messageExamples: [],
-      postExamples: [],
-      topics: [],
-      adjectives: [],
+      lore: [...DEFAULT_BONZI_CHARACTER_LORE],
+      messageExamples: cloneMessageExamples(DEFAULT_BONZI_MESSAGE_EXAMPLES),
+      postExamples: [...DEFAULT_BONZI_POST_EXAMPLES],
+      topics: [...DEFAULT_BONZI_TOPICS],
+      adjectives: [...DEFAULT_BONZI_ADJECTIVES],
       style: {
-        all: [],
-        chat: [],
-        post: []
+        all: [...DEFAULT_BONZI_STYLE.all],
+        chat: [...DEFAULT_BONZI_STYLE.chat],
+        post: [...DEFAULT_BONZI_STYLE.post]
       }
     },
     null,
     2
   )
+}
+
+export function isDefaultBonziEditableCharacterField(
+  fieldName: keyof SanitizedBonziCharacterOverride,
+  value: unknown
+): boolean {
+  switch (fieldName) {
+    case 'name':
+      return value === DEFAULT_BONZI_CHARACTER_NAME
+    case 'system':
+      return value === DEFAULT_BONZI_SYSTEM_PROMPT
+    case 'bio':
+      return (
+        value === DEFAULT_BONZI_CHARACTER_BIO ||
+        (Array.isArray(value) &&
+          value.length === 1 &&
+          value[0] === DEFAULT_BONZI_CHARACTER_BIO)
+      )
+    case 'lore':
+      return jsonEqual(value, DEFAULT_BONZI_CHARACTER_LORE)
+    case 'messageExamples':
+      return jsonEqual(value, DEFAULT_BONZI_MESSAGE_EXAMPLES)
+    case 'postExamples':
+      return jsonEqual(value, DEFAULT_BONZI_POST_EXAMPLES)
+    case 'topics':
+      return jsonEqual(value, DEFAULT_BONZI_TOPICS)
+    case 'adjectives':
+      return jsonEqual(value, DEFAULT_BONZI_ADJECTIVES)
+    case 'style':
+      return jsonEqual(value, DEFAULT_BONZI_STYLE)
+    default:
+      return false
+  }
+}
+
+function jsonEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
 }
 
 function createDefaultBonziSystemPrompt(options: {

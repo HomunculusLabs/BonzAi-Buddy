@@ -5,6 +5,9 @@ import type {
 } from '../../shared/contracts'
 import { dedupeStrings, isRecord } from '../../shared/value-utils'
 
+export const REGISTRY_MISSING_DESCRIPTION_FALLBACK =
+  'Plugin metadata was discovered from registry but has no description.'
+
 export interface RegistryPluginEntry {
   id: string
   name: string
@@ -115,13 +118,11 @@ function normalizeRegistryPluginEntry(item: unknown): RegistryPluginEntry | null
     ...(supportsMetadata ? readCompatibilityRecord(supportsMetadata) ?? [] : []),
     ...readNpmCompatibilityMetadata(npmMetadata)
   ])
-  const alphaSupported = supportsMetadata?.alpha
   const incompatible =
     item.compatible === false ||
     item.supported === false ||
     compatibilityMeta.includes('compatible:false') ||
-    compatibilityMeta.includes('supported:false') ||
-    alphaSupported === false
+    compatibilityMeta.includes('supported:false')
 
   const name =
     readString(item.name) ??
@@ -130,11 +131,9 @@ function normalizeRegistryPluginEntry(item: unknown): RegistryPluginEntry | null
   const description =
     readString(item.description) ??
     readString(item.summary) ??
-    'Plugin metadata was discovered from registry but has no description.'
-
-  if (!readString(item.description) && !readString(item.summary)) {
-    warnings.push('Registry entry did not include a description.')
-  }
+    readString(npmMetadata?.description) ??
+    readString(item.npmDescription) ??
+    REGISTRY_MISSING_DESCRIPTION_FALLBACK
 
   if (!packageName) {
     warnings.push('Registry entry did not include a package name.')

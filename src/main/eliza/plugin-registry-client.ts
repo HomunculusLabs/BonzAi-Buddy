@@ -1,9 +1,20 @@
-import { normalizeError } from '../../shared/value-utils'
-import type { LoadedRegistryEntries } from './plugin-registry-normalization'
-import { normalizeRegistryPayload } from './plugin-registry-normalization'
+import {
+  isRecord,
+  normalizeError,
+  normalizeOptionalString
+} from '../../shared/value-utils'
+import type {
+  LoadedRegistryEntries,
+  RegistryPluginEntry
+} from './plugin-registry-normalization'
+import {
+  normalizeRegistryPayload,
+  REGISTRY_MISSING_DESCRIPTION_FALLBACK
+} from './plugin-registry-normalization'
 import { PluginRegistryCache } from './plugin-registry-cache'
 
 const DEFAULT_REGISTRY_TIMEOUT_MS = 4_000
+const NPM_REGISTRY_BASE_URL = 'https://registry.npmjs.org'
 
 interface PluginRegistryClientOptions {
   registryUrl: string
@@ -59,16 +70,17 @@ export class PluginRegistryClient {
 
         const parsed = await response.json()
         const normalized = normalizeRegistryPayload(parsed)
+        const entries = await this.enrichMissingDescriptions(normalized.entries)
 
         this.cache.write({
-          schemaVersion: 1,
+          schemaVersion: 2,
           fetchedAt: new Date().toISOString(),
           registryUrl: this.registryUrl,
-          entries: normalized.entries
+          entries
         })
 
         return {
-          entries: normalized.entries,
+          entries,
           warnings: normalized.warnings
         }
       } finally {
@@ -92,6 +104,75 @@ export class PluginRegistryClient {
         entries: [],
         warnings
       }
+    }
+  }
+
+  private async enrichMissingDescriptions(
+    entries: RegistryPluginEntry[]
+  ): Promise<RegistryPluginEntry[]> {
+    return Promise.all(
+      entries.map(async (entry) => {
+        if (
+          entry.description !== REGISTRY_MISSING_DESCRIPTION_FALLBACK ||
+          !entry.packageName
+        ) {
+          return entry
+        }
+
+        const description = await this.loadNpmDescription(entry.packageName, entry.version)
+        return description ? { ...entry, description } : entry
+      })
+    )
+  }
+
+  private async loadNpmDescription(
+    packageName: string,
+    version: string | undefined
+  ): Promise<string | undefined> {
+    const packagePath = encodeURIComponent(packageName)
+    const urls = version
+      ? [
+          `${NPM_REGISTRY_BASE_URL}/${packagePath}/${encodeURIComponent(version)}`,
+          `${NPM_REGISTRY_BASE_URL}/${packagePath}`
+        ]
+      : [`${NPM_REGISTRY_BASE_URL}/${packagePath}`]
+
+    for (const url of urls) {
+      const description = await this.fetchNpmDescription(url)
+      if (description) {
+        return description
+      }
+    }
+
+    return undefined
+  }
+
+  private async fetchNpmDescription(url: string): Promise<string | undefined> {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
+
+    try {
+      const response = await this.fetchImpl(url, {
+        signal: controller.signal,
+        headers: {
+          Accept: 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        return undefined
+      }
+
+      const parsed = await response.json()
+      if (!isRecord(parsed)) {
+        return undefined
+      }
+
+      return normalizeOptionalString(parsed.description)
+    } catch {
+      return undefined
+    } finally {
+      clearTimeout(timeout)
     }
   }
 }

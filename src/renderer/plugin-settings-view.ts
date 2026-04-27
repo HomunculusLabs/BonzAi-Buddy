@@ -1,10 +1,16 @@
 import {
   ELIZA_OPTIONAL_PLUGIN_IDS,
+  type ElizaAvailablePluginEntry,
   type ElizaInstalledPluginEntry,
   type ElizaOptionalPluginId,
   type ElizaPluginSettings
 } from '../shared/contracts'
 import { escapeHtml } from './html-utils'
+
+interface RenderPluginSettingsOptions {
+  isSaving: boolean
+  pendingInstallPluginIds: ReadonlySet<string>
+}
 
 function normalizeStatus(plugin: {
   required?: boolean
@@ -26,12 +32,23 @@ function normalizeStatus(plugin: {
   return 'available'
 }
 
-function renderInlineMetadata(items: string[]): string {
+function formatStatusLabel(value: string): string {
+  return value
+    .split(' ')
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function renderMetadata(items: string[]): string {
   if (items.length === 0) {
     return ''
   }
 
-  return `<p class="plugin-row__description">${items.join(' · ')}</p>`
+  return `
+    <div class="plugin-card__meta">
+      ${items.map((item) => `<span>${item}</span>`).join('')}
+    </div>
+  `
 }
 
 function renderListMetadata(label: string, values: readonly string[]): string {
@@ -39,29 +56,34 @@ function renderListMetadata(label: string, values: readonly string[]): string {
     return ''
   }
 
-  return `<p class="plugin-row__description"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(values.join(', '))}</p>`
+  return `<p class="plugin-card__description"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(values.join(', '))}</p>`
 }
 
-function renderIssues(label: string, values: readonly string[]): string {
+function renderIssues(
+  label: string,
+  values: readonly string[],
+  tone: 'warning' | 'error'
+): string {
   if (values.length === 0) {
     return ''
   }
 
-  return `<p class="plugin-row__description"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(values.join(' | '))}</p>`
+  return `
+    <div class="plugin-card__issues plugin-card__issues--${tone}">
+      <strong>${escapeHtml(label)}</strong>
+      <span>${escapeHtml(values.join(' | '))}</span>
+    </div>
+  `
 }
 
-function renderInstalledPluginRow(
+function renderInstalledPluginCard(
   plugin: ElizaInstalledPluginEntry,
-  options: { isSaving: boolean }
+  options: RenderPluginSettingsOptions
 ): string {
   const checked = plugin.enabled ? 'checked' : ''
   const disabled = options.isSaving ? 'disabled' : ''
   const pluginId = escapeHtml(plugin.id)
-  const lifecycleStatus = normalizeStatus(plugin)
-  const statusLabel = lifecycleStatus
-    .split(' ')
-    .map((part) => part[0]?.toUpperCase() + part.slice(1))
-    .join(' ')
+  const statusLabel = formatStatusLabel(normalizeStatus(plugin))
   const metadata: string[] = []
 
   if (plugin.packageName) {
@@ -85,10 +107,10 @@ function renderInstalledPluginRow(
 
   const toggleMarkup = canToggle
     ? `
-      <label class="plugin-row__action-group">
+      <label class="plugin-card__toggle">
         <span>Enabled</span>
         <input
-          class="plugin-row__toggle"
+          class="settings-toggle-card__toggle"
           type="checkbox"
           data-plugin-toggle="${pluginId}"
           ${checked}
@@ -102,7 +124,7 @@ function renderInstalledPluginRow(
     plugin.removable && isLegacyBuiltIn
       ? `
         <button
-          class="ghost-button plugin-row__button plugin-row__button--remove"
+          class="ghost-button plugin-card__button plugin-card__button--danger"
           type="button"
           data-plugin-remove="${pluginId}"
           ${disabled}
@@ -114,7 +136,7 @@ function renderInstalledPluginRow(
     plugin.removable && !isLegacyBuiltIn
       ? `
         <button
-          class="ghost-button plugin-row__button plugin-row__button--remove"
+          class="ghost-button plugin-card__button plugin-card__button--danger"
           type="button"
           data-plugin-uninstall="${pluginId}"
           ${disabled}
@@ -124,7 +146,7 @@ function renderInstalledPluginRow(
 
   const actionsMarkup =
     toggleMarkup || removeMarkup || uninstallMarkup
-      ? `<div class="plugin-row__actions">${toggleMarkup}${removeMarkup}${uninstallMarkup}</div>`
+      ? `<div class="plugin-card__actions">${toggleMarkup}${removeMarkup}${uninstallMarkup}</div>`
       : ''
 
   const policyAttribute = plugin.executionPolicy
@@ -132,37 +154,26 @@ function renderInstalledPluginRow(
     : ''
 
   return `
-    <article class="plugin-row" data-plugin-id="${pluginId}" data-plugin-installed="true"${policyAttribute}>
-      <div class="plugin-row__copy">
-        <div class="plugin-row__title">
-          ${escapeHtml(plugin.name)}
-          <span class="plugin-row__status">${escapeHtml(statusLabel)}</span>
+    <article class="settings-card plugin-card plugin-row" data-plugin-id="${pluginId}" data-plugin-installed="true"${policyAttribute}>
+      <div class="plugin-card__main">
+        <div class="plugin-card__title-row">
+          <h4>${escapeHtml(plugin.name)}</h4>
+          <span class="settings-badge">${escapeHtml(statusLabel)}</span>
         </div>
-        ${renderInlineMetadata(metadata)}
-        <p class="plugin-row__description">${escapeHtml(plugin.description)}</p>
+        <p class="plugin-card__description">${escapeHtml(plugin.description)}</p>
+        ${renderMetadata(metadata)}
         ${renderListMetadata('Capabilities', plugin.capabilities ?? [])}
-        ${renderIssues('Warnings', plugin.warnings ?? [])}
-        ${renderIssues('Errors', plugin.errors ?? [])}
+        ${renderIssues('Warnings', plugin.warnings ?? [], 'warning')}
+        ${renderIssues('Errors', plugin.errors ?? [], 'error')}
       </div>
       ${actionsMarkup}
     </article>
   `
 }
 
-function renderAvailablePluginRow(
-  plugin: {
-    id: string
-    name: string
-    packageName?: string
-    version?: string
-    description: string
-    source?: string
-    lifecycleStatus?: string
-    executionPolicy?: string
-    warnings?: string[]
-    errors?: string[]
-  },
-  options: { isSaving: boolean }
+function renderAvailablePluginCard(
+  plugin: ElizaAvailablePluginEntry,
+  options: RenderPluginSettingsOptions
 ): string {
   const pluginId = escapeHtml(plugin.id)
   const metadata: string[] = []
@@ -183,12 +194,15 @@ function renderAvailablePluginRow(
     metadata.push(`Policy ${escapeHtml(plugin.executionPolicy)}`)
   }
 
-  const statusLabel = normalizeStatus(plugin)
-    .split(' ')
-    .map((part) => part[0]?.toUpperCase() + part.slice(1))
-    .join(' ')
+  const isPendingInstall = options.pendingInstallPluginIds.has(plugin.id)
+  const rawStatusLabel = isPendingInstall ? 'preview ready' : normalizeStatus(plugin)
+  const statusLabel = formatStatusLabel(rawStatusLabel)
   const isLegacyBuiltIn = isElizaOptionalPluginId(plugin.id)
-  const addOrInstallLabel = isLegacyBuiltIn ? 'Add' : 'Install'
+  const addOrInstallLabel = isPendingInstall
+    ? 'Confirm install'
+    : isLegacyBuiltIn
+      ? 'Add'
+      : 'Install'
   const addOrInstallAttr = isLegacyBuiltIn
     ? `data-plugin-add="${pluginId}"`
     : `data-plugin-install="${pluginId}"`
@@ -196,22 +210,23 @@ function renderAvailablePluginRow(
   const policyAttribute = plugin.executionPolicy
     ? ` data-plugin-policy="${escapeHtml(plugin.executionPolicy)}"`
     : ''
+  const pendingClass = isPendingInstall ? ' plugin-card--pending' : ''
 
   return `
-    <article class="plugin-row" data-plugin-id="${pluginId}" data-plugin-available="true"${policyAttribute}>
-      <div class="plugin-row__copy">
-        <div class="plugin-row__title">
-          ${escapeHtml(plugin.name)}
-          <span class="plugin-row__status">${escapeHtml(statusLabel)}</span>
+    <article class="settings-card plugin-card plugin-row${pendingClass}" data-plugin-id="${pluginId}" data-plugin-available="true"${policyAttribute}>
+      <div class="plugin-card__main">
+        <div class="plugin-card__title-row">
+          <h4>${escapeHtml(plugin.name)}</h4>
+          <span class="settings-badge">${escapeHtml(statusLabel)}</span>
         </div>
-        ${renderInlineMetadata(metadata)}
-        <p class="plugin-row__description">${escapeHtml(plugin.description)}</p>
-        ${renderIssues('Warnings', plugin.warnings ?? [])}
-        ${renderIssues('Errors', plugin.errors ?? [])}
+        <p class="plugin-card__description">${escapeHtml(plugin.description)}</p>
+        ${renderMetadata(metadata)}
+        ${renderIssues('Warnings', plugin.warnings ?? [], 'warning')}
+        ${renderIssues('Errors', plugin.errors ?? [], 'error')}
       </div>
-      <div class="plugin-row__actions">
+      <div class="plugin-card__actions">
         <button
-          class="ghost-button plugin-row__button"
+          class="ghost-button plugin-card__button${isPendingInstall ? ' plugin-card__button--confirm' : ''}"
           type="button"
           ${addOrInstallAttr}
           ${options.isSaving ? 'disabled' : ''}
@@ -221,14 +236,36 @@ function renderAvailablePluginRow(
   `
 }
 
+function renderPluginGroup(
+  label: string,
+  copy: string,
+  count: number,
+  content: string
+): string {
+  return `
+    <section class="plugin-settings__group" aria-label="${escapeHtml(label)}">
+      <header class="plugin-settings__group-header">
+        <div>
+          <h3 class="settings-panel__section-title">${escapeHtml(label)}</h3>
+          <p class="settings-panel__section-copy">${escapeHtml(copy)}</p>
+        </div>
+        <span class="settings-count-badge" aria-label="${count} plugins">${count}</span>
+      </header>
+      <div class="plugin-settings__grid">
+        ${content}
+      </div>
+    </section>
+  `
+}
+
 export function renderPluginSettings(
   container: HTMLElement,
   settings: ElizaPluginSettings | null,
-  options: { isSaving: boolean }
+  options: RenderPluginSettingsOptions
 ): void {
   if (!settings) {
     container.innerHTML =
-      '<p class="settings-panel__muted">Loading elizaOS plugins…</p>'
+      '<p class="settings-panel__muted settings-panel__empty">Loading elizaOS plugins…</p>'
     return
   }
 
@@ -241,45 +278,42 @@ export function renderPluginSettings(
     requiredPlugins.length === 0
       ? '<p class="settings-panel__empty">No runtime-required plugins were reported.</p>'
       : requiredPlugins
-          .map((plugin) => renderInstalledPluginRow(plugin, options))
+          .map((plugin) => renderInstalledPluginCard(plugin, options))
           .join('')
 
   const installedMarkup =
     installedPlugins.length === 0
       ? '<p class="settings-panel__empty">No optional or external plugins are currently installed.</p>'
       : installedPlugins
-          .map((plugin) => renderInstalledPluginRow(plugin, options))
+          .map((plugin) => renderInstalledPluginCard(plugin, options))
           .join('')
 
   const availableMarkup =
     settings.availablePlugins.length === 0
       ? '<p class="settings-panel__empty">No discoverable plugins are available right now.</p>'
       : settings.availablePlugins
-          .map((plugin) => renderAvailablePluginRow(plugin, options))
+          .map((plugin) => renderAvailablePluginCard(plugin, options))
           .join('')
 
   container.innerHTML = `
-    <section class="settings-panel__section" aria-label="Runtime required plugins">
-      <header class="settings-panel__section-header">
-        <h3 class="settings-panel__section-title">Runtime required</h3>
-        <p class="settings-panel__section-copy">These plugins are required by Bonzi runtime and cannot be toggled or removed here.</p>
-      </header>
-      ${requiredMarkup}
-    </section>
-    <section class="settings-panel__section" aria-label="Installed elizaOS plugins">
-      <header class="settings-panel__section-header">
-        <h3 class="settings-panel__section-title">Installed plugins</h3>
-        <p class="settings-panel__section-copy">Manage optional Bonzi built-ins and installed external plugins.</p>
-      </header>
-      ${installedMarkup}
-    </section>
-    <section class="settings-panel__section" aria-label="Discoverable elizaOS plugins">
-      <header class="settings-panel__section-header">
-        <h3 class="settings-panel__section-title">Discover plugins</h3>
-        <p class="settings-panel__section-copy">Registry plugins require confirmation before install and are added disabled by default.</p>
-      </header>
-      ${availableMarkup}
-    </section>
+    ${renderPluginGroup(
+      'Runtime required',
+      'These plugins are required by Bonzi runtime and cannot be toggled or removed here.',
+      requiredPlugins.length,
+      requiredMarkup
+    )}
+    ${renderPluginGroup(
+      'Installed plugins',
+      'Manage optional Bonzi built-ins and installed external plugins.',
+      installedPlugins.length,
+      installedMarkup
+    )}
+    ${renderPluginGroup(
+      'Discover plugins',
+      'Registry plugins require confirmation before install and are added disabled by default.',
+      settings.availablePlugins.length,
+      availableMarkup
+    )}
   `
 }
 

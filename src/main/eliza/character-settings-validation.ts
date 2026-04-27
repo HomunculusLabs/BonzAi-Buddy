@@ -4,10 +4,8 @@ import type {
 } from '../../shared/contracts'
 import { isRecord } from '../../shared/value-utils'
 import {
-  DEFAULT_BONZI_CHARACTER_BIO,
-  DEFAULT_BONZI_CHARACTER_NAME,
-  DEFAULT_BONZI_SYSTEM_PROMPT,
-  createDefaultBonziEditableCharacterJson
+  createDefaultBonziEditableCharacterJson,
+  isDefaultBonziEditableCharacterField
 } from './bonzi-character'
 import {
   DEFAULT_CHARACTER_SETTINGS,
@@ -432,21 +430,12 @@ function stripDefaultCharacterTemplateFields(
 ): SanitizedBonziCharacterOverride {
   const stripped: SanitizedBonziCharacterOverride = { ...override }
 
-  if (stripped.name === DEFAULT_BONZI_CHARACTER_NAME) {
-    delete stripped.name
-  }
-
-  if (stripped.system === DEFAULT_BONZI_SYSTEM_PROMPT) {
-    delete stripped.system
-  }
-
-  if (
-    stripped.bio === DEFAULT_BONZI_CHARACTER_BIO ||
-    (Array.isArray(stripped.bio) &&
-      stripped.bio.length === 1 &&
-      stripped.bio[0] === DEFAULT_BONZI_CHARACTER_BIO)
-  ) {
-    delete stripped.bio
+  for (const fieldName of Object.keys(stripped) as Array<
+    keyof SanitizedBonziCharacterOverride
+  >) {
+    if (isDefaultBonziEditableCharacterField(fieldName, stripped[fieldName])) {
+      delete stripped[fieldName]
+    }
   }
 
   return stripped

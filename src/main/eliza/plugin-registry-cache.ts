@@ -3,11 +3,11 @@ import { dirname } from 'node:path'
 import { isRecord } from '../../shared/value-utils'
 import type { RegistryPluginEntry } from './plugin-registry-normalization'
 
-export const REGISTRY_CACHE_FILE_NAME = 'eliza-plugin-registry-cache.v1.json'
+export const REGISTRY_CACHE_FILE_NAME = 'eliza-plugin-registry-cache.v2.json'
 const REGISTRY_CACHE_TTL_MS = 30 * 60 * 1000
 
 export interface RegistryCacheFile {
-  schemaVersion: 1
+  schemaVersion: 2
   fetchedAt: string
   registryUrl: string
   entries: RegistryPluginEntry[]
@@ -58,7 +58,7 @@ function isRegistryCacheFile(value: unknown): value is RegistryCacheFile {
   }
 
   return (
-    value.schemaVersion === 1 &&
+    value.schemaVersion === 2 &&
     typeof value.fetchedAt === 'string' &&
     typeof value.registryUrl === 'string' &&
     Array.isArray(value.entries)

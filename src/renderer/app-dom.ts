@@ -44,39 +44,150 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
         </div>
       </header>
 
-      <aside class="settings-panel" data-settings-panel hidden aria-label="Settings">
+      <aside
+        class="settings-panel"
+        data-settings-panel
+        hidden
+        role="dialog"
+        aria-modal="false"
+        aria-labelledby="settings-panel-title"
+      >
         <header class="settings-panel__header">
           <div>
-            <h2>Settings</h2>
-            <p>Manage autonomy and elizaOS plugins loaded by Bonzi.</p>
+            <p class="settings-panel__eyebrow">Bonzi Companion</p>
+            <h2 id="settings-panel-title">Settings</h2>
+            <p>Manage Bonzi's companion, autonomy, character, and elizaOS plugins.</p>
           </div>
           <button class="window-button" data-action="settings-close" type="button" aria-label="Close settings">×</button>
         </header>
-        <div class="settings-panel__section companion-settings" data-companion-settings>
-          <div class="settings-panel__section-header">
-            <h3 class="settings-panel__section-title">Buddy</h3>
-            <p class="settings-panel__section-copy">Choose which desktop companion to render.</p>
+
+        <div class="settings-panel__layout">
+          <nav class="settings-panel__nav" role="tablist" aria-label="Settings sections">
+            <button
+              class="settings-panel__tab"
+              data-settings-tab="general"
+              id="settings-tab-general"
+              type="button"
+              role="tab"
+              aria-controls="settings-pane-general"
+              aria-selected="true"
+            >
+              <span>General</span>
+              <small>Buddy</small>
+            </button>
+            <button
+              class="settings-panel__tab"
+              data-settings-tab="approvals"
+              id="settings-tab-approvals"
+              type="button"
+              role="tab"
+              aria-controls="settings-pane-approvals"
+              aria-selected="false"
+              tabindex="-1"
+            >
+              <span>Approvals</span>
+              <small>Autonomy</small>
+            </button>
+            <button
+              class="settings-panel__tab"
+              data-settings-tab="character"
+              id="settings-tab-character"
+              type="button"
+              role="tab"
+              aria-controls="settings-pane-character"
+              aria-selected="false"
+              tabindex="-1"
+            >
+              <span>Character</span>
+              <small>Eliza JSON</small>
+            </button>
+            <button
+              class="settings-panel__tab"
+              data-settings-tab="plugins"
+              id="settings-tab-plugins"
+              type="button"
+              role="tab"
+              aria-controls="settings-pane-plugins"
+              aria-selected="false"
+              tabindex="-1"
+            >
+              <span>Plugins</span>
+              <small>Runtime</small>
+            </button>
+          </nav>
+
+          <div class="settings-panel__content">
+            <section
+              class="settings-panel__pane settings-panel__pane--general"
+              data-settings-pane="general"
+              id="settings-pane-general"
+              role="tabpanel"
+              aria-labelledby="settings-tab-general"
+            >
+              <div class="settings-panel__section companion-settings" data-companion-settings>
+                <div class="settings-panel__section-header">
+                  <h3 class="settings-panel__section-title">Buddy</h3>
+                  <p class="settings-panel__section-copy">Choose which desktop companion to render.</p>
+                </div>
+                <label class="companion-settings__field settings-card">
+                  <span>
+                    <strong>Character</strong>
+                    <small>Controls the visible desktop companion.</small>
+                  </span>
+                  <select class="companion-settings__select" data-buddy-select>
+                    <option value="bonzi">Bonzi Buddy</option>
+                    <option value="jellyfish">Jellyfish Buddy</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section
+              class="settings-panel__pane"
+              data-settings-pane="approvals"
+              id="settings-pane-approvals"
+              role="tabpanel"
+              aria-labelledby="settings-tab-approvals"
+              hidden
+            >
+              <div class="settings-panel__section" data-approval-settings></div>
+            </section>
+
+            <section
+              class="settings-panel__pane"
+              data-settings-pane="character"
+              id="settings-pane-character"
+              role="tabpanel"
+              aria-labelledby="settings-tab-character"
+              hidden
+            >
+              <div class="settings-panel__section character-settings" data-character-settings></div>
+            </section>
+
+            <section
+              class="settings-panel__pane"
+              data-settings-pane="plugins"
+              id="settings-pane-plugins"
+              role="tabpanel"
+              aria-labelledby="settings-tab-plugins"
+              hidden
+            >
+              <div class="settings-panel__plugins" data-plugin-settings></div>
+            </section>
           </div>
-          <label class="companion-settings__field">
-            <span>Character</span>
-            <select class="companion-settings__select" data-buddy-select>
-              <option value="bonzi">Bonzi Buddy</option>
-              <option value="jellyfish">Jellyfish Buddy</option>
-            </select>
-          </label>
         </div>
-        <div class="settings-panel__section character-settings" data-character-settings></div>
-        <div class="settings-panel__section" data-approval-settings></div>
-        <div class="settings-panel__plugins" data-plugin-settings></div>
-        <p class="settings-panel__status" data-settings-status aria-live="polite"></p>
-        <button
-          class="ghost-button"
-          data-action="apply-runtime-changes"
-          type="button"
-          hidden
-        >
-          Apply Runtime Changes
-        </button>
+
+        <footer class="settings-panel__footer">
+          <p class="settings-panel__status" data-settings-status aria-live="polite"></p>
+          <button
+            class="ghost-button settings-panel__apply"
+            data-action="apply-runtime-changes"
+            type="button"
+            hidden
+          >
+            Apply Runtime Changes
+          </button>
+        </footer>
       </aside>
 
       <section class="stage-card">
