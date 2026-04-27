@@ -1,5 +1,6 @@
 import {
   ELIZA_OPTIONAL_PLUGIN_IDS,
+  derivePluginInstallEligibility,
   type ElizaAvailablePluginEntry,
   type ElizaInstalledPluginEntry,
   type ElizaOptionalPluginId,
@@ -211,6 +212,18 @@ function renderAvailablePluginCard(
     ? ` data-plugin-policy="${escapeHtml(plugin.executionPolicy)}"`
     : ''
   const pendingClass = isPendingInstall ? ' plugin-card--pending' : ''
+  const installEligibility = isLegacyBuiltIn
+    ? { eligible: true as const, reason: undefined }
+    : derivePluginInstallEligibility({
+        packageName: plugin.packageName,
+        lifecycleStatus: plugin.lifecycleStatus
+      })
+  const installDisabled =
+    options.isSaving || (isPendingInstall ? false : !installEligibility.eligible)
+  const installDisabledReason =
+    !isPendingInstall && !installEligibility.eligible
+      ? ` title="${escapeHtml(installEligibility.reason ?? 'Install unavailable')}"`
+      : ''
 
   return `
     <article class="settings-card plugin-card plugin-row${pendingClass}" data-plugin-id="${pluginId}" data-plugin-available="true"${policyAttribute}>
@@ -229,7 +242,7 @@ function renderAvailablePluginCard(
           class="ghost-button plugin-card__button${isPendingInstall ? ' plugin-card__button--confirm' : ''}"
           type="button"
           ${addOrInstallAttr}
-          ${options.isSaving ? 'disabled' : ''}
+          ${installDisabled ? 'disabled' : ''}${installDisabledReason}
         >${addOrInstallLabel}</button>
       </div>
     </article>

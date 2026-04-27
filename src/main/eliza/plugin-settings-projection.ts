@@ -16,6 +16,7 @@ import {
   type PersistedPluginRecord
 } from './plugin-settings-model'
 import {
+  canonicalizePluginLifecycleStatus,
   createDefaultPluginState,
   isOptionalPluginId,
   isRequiredPluginId
@@ -96,9 +97,10 @@ export function buildPluginSettings(input: {
 export function buildRuntimeSettings(input: {
   inventory: NormalizedPluginInventory
   approvalsEnabled: boolean
+  continuation: typeof DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation
   characterSettings: NormalizedCharacterSettings
 }): BonziElizaPluginRuntimeSettings {
-  const { inventory, approvalsEnabled, characterSettings } = input
+  const { inventory, approvalsEnabled, continuation, characterSettings } = input
 
   return {
     contextEnabled:
@@ -108,6 +110,7 @@ export function buildRuntimeSettings(input: {
       inventory['bonzi-desktop-actions']?.enabled ??
       DEFAULT_PLUGIN_RUNTIME_SETTINGS.desktopActionsEnabled,
     approvalsEnabled,
+    continuation,
     character: {
       enabled: characterSettings.enabled,
       characterJson: characterSettings.characterJson,
@@ -130,7 +133,10 @@ function catalogEntryToInstalledPlugin(
     configurable: true,
     removable: true,
     source: pluginState.source,
-    lifecycleStatus: pluginState.lifecycleStatus,
+    lifecycleStatus: canonicalizePluginLifecycleStatus(pluginState.lifecycleStatus, {
+      installed: true,
+      enabled: pluginState.enabled
+    }),
     executionPolicy: pluginState.executionPolicy
   }
 }
@@ -153,7 +159,10 @@ function unknownEntryToInstalledPlugin(
     configurable: false,
     removable,
     source: pluginState.source,
-    lifecycleStatus: pluginState.lifecycleStatus,
+    lifecycleStatus: canonicalizePluginLifecycleStatus(pluginState.lifecycleStatus, {
+      installed: true,
+      enabled: pluginState.enabled
+    }),
     executionPolicy: pluginState.executionPolicy,
     capabilities: pluginState.capabilities
   }
@@ -168,7 +177,10 @@ function catalogEntryToAvailablePlugin(
     ...(plugin.packageName ? { packageName: plugin.packageName } : {}),
     description: plugin.description,
     source: 'bonzi-builtin',
-    lifecycleStatus: 'available',
+    lifecycleStatus: canonicalizePluginLifecycleStatus(undefined, {
+      installed: false,
+      enabled: false
+    }),
     executionPolicy: 'trusted_auto'
   }
 }

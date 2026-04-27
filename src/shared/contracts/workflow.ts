@@ -2,6 +2,7 @@ export type BonziWorkflowRunStatus =
   | 'queued'
   | 'running'
   | 'awaiting_user'
+  | 'awaiting_external_action'
   | 'cancel_requested'
   | 'cancelled'
   | 'completed'
@@ -13,6 +14,7 @@ export type BonziWorkflowStepStatus =
   | 'running'
   | 'awaiting_user'
   | 'awaiting_approval'
+  | 'awaiting_external_action'
   | 'cancel_requested'
   | 'cancelled'
   | 'skipped'
@@ -34,6 +36,10 @@ export interface BonziWorkflowStepSnapshot {
   approvalRequestedAt?: string
   approvalRespondedAt?: string
   approvalApproved?: boolean
+  externalActionId?: string
+  externalActionType?: string
+  continuationId?: string
+  continuationIndex?: number
 }
 
 export interface BonziWorkflowCallbackSnapshot {

@@ -125,6 +125,7 @@ export interface ElizaPluginInstallRequest {
   packageName?: string
   versionRange?: string
   registryRef?: string
+  lifecycleStatus?: ElizaPluginLifecycleStatus
   confirmed?: boolean
   confirmationOperationId?: string
   ignoreScripts?: boolean
@@ -177,4 +178,43 @@ export interface ElizaPluginOperationResult {
   message: string
   operation: ElizaPluginOperationSnapshot
   settings: ElizaPluginSettings
+}
+
+export type ElizaPluginInstallEligibilityCode =
+  | 'eligible'
+  | 'missing_package_name'
+  | 'incompatible'
+
+export interface ElizaPluginInstallEligibility {
+  eligible: boolean
+  code: ElizaPluginInstallEligibilityCode
+  reason?: string
+}
+
+export function derivePluginInstallEligibility(input: {
+  packageName?: string
+  lifecycleStatus?: ElizaPluginLifecycleStatus
+}): ElizaPluginInstallEligibility {
+  if (input.lifecycleStatus === 'incompatible') {
+    return {
+      eligible: false,
+      code: 'incompatible',
+      reason:
+        'Cannot install this plugin because registry metadata marked it incompatible with the current runtime.'
+    }
+  }
+
+  if (!input.packageName) {
+    return {
+      eligible: false,
+      code: 'missing_package_name',
+      reason:
+        'Cannot install this plugin because registry metadata did not include a package name.'
+    }
+  }
+
+  return {
+    eligible: true,
+    code: 'eligible'
+  }
 }

@@ -1,6 +1,7 @@
-import type {
-  ShellState,
-  UpdateElizaPluginSettingsRequest
+import {
+  derivePluginInstallEligibility,
+  type ShellState,
+  type UpdateElizaPluginSettingsRequest
 } from '../shared/contracts'
 import { isElizaOptionalPluginId } from './plugin-settings-view'
 import type {
@@ -138,9 +139,14 @@ export function createPluginSettingsFlows(
       return
     }
 
-    if (!availablePlugin.packageName) {
+    const eligibility = derivePluginInstallEligibility({
+      packageName: availablePlugin.packageName,
+      lifecycleStatus: availablePlugin.lifecycleStatus
+    })
+
+    if (!eligibility.eligible) {
       options.setStatusMessage(
-        'Cannot install this plugin because registry metadata did not include a package name.'
+        eligibility.reason ?? 'Cannot install this plugin from current registry metadata.'
       )
       return
     }
@@ -158,6 +164,7 @@ export function createPluginSettingsFlows(
           pluginId: availablePlugin.id,
           packageName: availablePlugin.packageName,
           versionRange: availablePlugin.version,
+          lifecycleStatus: availablePlugin.lifecycleStatus,
           confirmed: false
         })
 
@@ -196,6 +203,7 @@ export function createPluginSettingsFlows(
         pluginId: availablePlugin.id,
         packageName: availablePlugin.packageName,
         versionRange: availablePlugin.version,
+        lifecycleStatus: availablePlugin.lifecycleStatus,
         confirmed: true,
         confirmationOperationId: pendingConfirmationOperationId
       })

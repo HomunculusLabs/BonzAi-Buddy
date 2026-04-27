@@ -9,6 +9,7 @@ export interface SettingsStatusController {
   setPluginSaving(saving: boolean): void
   setApprovalSaving(saving: boolean): void
   setCharacterSaving(saving: boolean): void
+  setKnowledgeSaving(saving: boolean): void
   setApplyingRuntimeChanges(applying: boolean): void
   isApplyingRuntimeChanges(): boolean
   getRuntimeReloadPending(): boolean
@@ -22,6 +23,7 @@ export function createSettingsStatusController(
   let isPluginSaving = false
   let isApprovalSaving = false
   let isCharacterSaving = false
+  let isKnowledgeSaving = false
   let isApplyingRuntimeChanges = false
   let isRuntimeReloadPending = false
   let settingsStatusMessage = ''
@@ -42,6 +44,7 @@ export function createSettingsStatusController(
       isPluginSaving ||
       isApprovalSaving ||
       isCharacterSaving ||
+      isKnowledgeSaving ||
       isApplyingRuntimeChanges
   }
 
@@ -66,6 +69,10 @@ export function createSettingsStatusController(
     },
     setCharacterSaving: (saving) => {
       isCharacterSaving = saving
+      syncSettingsStatusUi()
+    },
+    setKnowledgeSaving: (saving) => {
+      isKnowledgeSaving = saving
       syncSettingsStatusUi()
     },
     setApplyingRuntimeChanges: (applying) => {

@@ -26,15 +26,20 @@ import {
   normalizeActionCount
 } from './workflow-snapshot-utils'
 import {
+  appendExternalActionWorkflowStep,
   appendWorkflowStep,
   autoApproveWorkflowStep,
   cancelWorkflowRun,
+  completeWorkflowExternalAction,
   completeWorkflowRun,
+  failWorkflowExternalAction,
   failWorkflowRun,
+  linkWorkflowExternalAction,
   markWorkflowRunRunning,
   requestWorkflowRunCancellation,
   requestWorkflowStepApproval,
   respondToWorkflowStepApproval,
+  startWorkflowExternalAction,
   transitionWorkflowStep
 } from './workflow-state-transitions'
 
@@ -57,6 +62,22 @@ interface UpdateWorkflowStepInput {
   runId: string
   stepId: string
   detail?: string
+}
+
+interface StartExternalActionStepInput {
+  runId: string
+  title: string
+  detail?: string
+  actionType: string
+  continuationId: string
+  continuationIndex: number
+}
+
+export interface WorkflowExternalActionState {
+  awaitingActionCount: number
+  runningActionCount: number
+  openActionCount: number
+  hasOpenActions: boolean
 }
 
 export class BonziWorkflowManager {
@@ -167,6 +188,106 @@ export class BonziWorkflowManager {
 
   skipStep(input: UpdateWorkflowStepInput): BonziWorkflowStepSnapshot | null {
     return this.transitionStep(input, 'skipped')
+  }
+
+  startExternalActionStep(
+    input: StartExternalActionStepInput
+  ): BonziWorkflowStepSnapshot | null {
+    const runId = this.resolveRunId(input.runId)
+
+    if (!runId) {
+      return null
+    }
+
+    const nowIso = this.now().toISOString()
+    const step: BonziWorkflowStepSnapshot = {
+      id: crypto.randomUUID(),
+      title: clampText(input.title, WORKFLOW_STEP_TITLE_LIMIT) || 'Bonzi action',
+      status: 'awaiting_external_action',
+      startedAt: nowIso,
+      updatedAt: nowIso,
+      detail: clampOptionalText(input.detail, WORKFLOW_TEXT_LIMIT),
+      externalActionType: clampOptionalText(input.actionType, 128),
+      continuationId: clampOptionalText(input.continuationId, 256),
+      continuationIndex: Math.max(0, Math.floor(input.continuationIndex))
+    }
+
+    const updated = this.updateRun(runId, (current) =>
+      appendExternalActionWorkflowStep(current, step)
+    )
+
+    return updated?.steps.find((candidate) => candidate.id === step.id) ?? null
+  }
+
+  linkExternalAction(input: {
+    runId: string
+    stepId: string
+    actionId: string
+  }): BonziWorkflowRunSnapshot | null {
+    return this.updateRun(input.runId, (current) =>
+      linkWorkflowExternalAction(current, {
+        stepId: input.stepId,
+        actionId: input.actionId
+      })
+    )
+  }
+
+  runExternalAction(input: UpdateWorkflowStepInput): BonziWorkflowRunSnapshot | null {
+    return this.updateRun(input.runId, (current) =>
+      startWorkflowExternalAction(
+        current,
+        { stepId: input.stepId, detail: input.detail },
+        { nowIso: this.now().toISOString() }
+      )
+    )
+  }
+
+  completeExternalAction(input: UpdateWorkflowStepInput): BonziWorkflowRunSnapshot | null {
+    return this.updateRun(input.runId, (current) =>
+      completeWorkflowExternalAction(
+        current,
+        { stepId: input.stepId, detail: input.detail },
+        { nowIso: this.now().toISOString() }
+      )
+    )
+  }
+
+  failExternalAction(input: UpdateWorkflowStepInput): BonziWorkflowRunSnapshot | null {
+    return this.updateRun(input.runId, (current) =>
+      failWorkflowExternalAction(
+        current,
+        { stepId: input.stepId, detail: input.detail },
+        { nowIso: this.now().toISOString() }
+      )
+    )
+  }
+
+  getExternalActionState(runId: string): WorkflowExternalActionState {
+    const run = this.getRun(runId)
+    const externalSteps =
+      run?.steps.filter((step) => Boolean(step.externalActionType)) ?? []
+    const awaitingActionCount = externalSteps.filter(
+      (step) => step.status === 'awaiting_external_action'
+    ).length
+    const runningActionCount = externalSteps.filter(
+      (step) => step.status === 'running'
+    ).length
+    const openActionCount = awaitingActionCount + runningActionCount
+
+    return {
+      awaitingActionCount,
+      runningActionCount,
+      openActionCount,
+      hasOpenActions: openActionCount > 0
+    }
+  }
+
+  hasOpenExternalActions(runId: string): boolean {
+    return this.getExternalActionState(runId).hasOpenActions
+  }
+
+  hasAwaitingExternalActions(runId: string): boolean {
+    return this.hasOpenExternalActions(runId)
   }
 
   async requestStepApproval(input: {
@@ -490,6 +611,7 @@ export class BonziWorkflowManager {
         (run.status !== 'queued' &&
           run.status !== 'running' &&
           run.status !== 'awaiting_user' &&
+          run.status !== 'awaiting_external_action' &&
           run.status !== 'cancel_requested')
       ) {
         continue

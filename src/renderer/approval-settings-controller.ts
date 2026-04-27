@@ -1,5 +1,6 @@
 import {
   type RuntimeApprovalSettings,
+  type RuntimeContinuationSettings,
   type ShellState
 } from '../shared/contracts'
 
@@ -21,6 +22,52 @@ export interface ApprovalSettingsController {
   dispose(): void
 }
 
+const CONTINUATION_DEFAULTS: RuntimeContinuationSettings = {
+  maxSteps: 6,
+  maxRuntimeMs: 120_000,
+  postActionDelayMs: 750
+}
+
+const CONTINUATION_LIMITS: Record<
+  keyof RuntimeContinuationSettings,
+  { min: number; max: number }
+> = {
+  maxSteps: { min: 1, max: 20 },
+  maxRuntimeMs: { min: 5_000, max: 600_000 },
+  postActionDelayMs: { min: 0, max: 10_000 }
+}
+
+function clampContinuationSetting(
+  key: keyof RuntimeContinuationSettings,
+  value: number
+): number {
+  const bounds = CONTINUATION_LIMITS[key]
+
+  return Math.min(bounds.max, Math.max(bounds.min, value))
+}
+
+function getEffectiveSettings(
+  settings: RuntimeApprovalSettings | null
+): RuntimeApprovalSettings {
+  return {
+    approvalsEnabled: settings?.approvalsEnabled !== false,
+    continuation: {
+      ...CONTINUATION_DEFAULTS,
+      ...(settings?.continuation ?? {})
+    }
+  }
+}
+
+function isContinuationField(
+  value: string | undefined
+): value is keyof RuntimeContinuationSettings {
+  return (
+    value === 'maxSteps' ||
+    value === 'maxRuntimeMs' ||
+    value === 'postActionDelayMs'
+  )
+}
+
 export function createApprovalSettingsController(
   options: ApprovalSettingsControllerOptions
 ): ApprovalSettingsController {
@@ -30,7 +77,8 @@ export function createApprovalSettingsController(
   let isSavingApprovalSettings = false
 
   const rerenderApprovalSettings = (): void => {
-    const approvalsEnabled = approvalSettings?.approvalsEnabled !== false
+    const effectiveSettings = getEffectiveSettings(approvalSettings)
+    const approvalsEnabled = effectiveSettings.approvalsEnabled
 
     approvalSettingsEl.innerHTML = `
       <div class="settings-panel__section-header">
@@ -62,6 +110,66 @@ export function createApprovalSettingsController(
           />
         </span>
       </label>
+
+      <section class="settings-card approval-continuation-settings" aria-label="Continuation settings">
+        <div class="settings-panel__section-header">
+          <h4 class="settings-panel__section-title">Continuation pacing</h4>
+          <p class="settings-panel__section-copy">
+            Bound autonomous continuation loops after external action cards complete.
+          </p>
+        </div>
+
+        <label class="approval-continuation-field">
+          <span class="approval-continuation-field__copy">
+            <strong>Max continuation steps</strong>
+            <small>Stop the workflow after this many continuation passes.</small>
+          </span>
+          <input
+            class="approval-continuation-field__input"
+            type="number"
+            data-continuation-field="maxSteps"
+            min="${CONTINUATION_LIMITS.maxSteps.min}"
+            max="${CONTINUATION_LIMITS.maxSteps.max}"
+            step="1"
+            value="${effectiveSettings.continuation.maxSteps}"
+            ${isSavingApprovalSettings ? 'disabled' : ''}
+          />
+        </label>
+
+        <label class="approval-continuation-field">
+          <span class="approval-continuation-field__copy">
+            <strong>Max workflow runtime (ms)</strong>
+            <small>Hard timeout for continued workflow execution.</small>
+          </span>
+          <input
+            class="approval-continuation-field__input"
+            type="number"
+            data-continuation-field="maxRuntimeMs"
+            min="${CONTINUATION_LIMITS.maxRuntimeMs.min}"
+            max="${CONTINUATION_LIMITS.maxRuntimeMs.max}"
+            step="100"
+            value="${effectiveSettings.continuation.maxRuntimeMs}"
+            ${isSavingApprovalSettings ? 'disabled' : ''}
+          />
+        </label>
+
+        <label class="approval-continuation-field">
+          <span class="approval-continuation-field__copy">
+            <strong>Post-action delay (ms)</strong>
+            <small>Pause between action completion and next continuation pass.</small>
+          </span>
+          <input
+            class="approval-continuation-field__input"
+            type="number"
+            data-continuation-field="postActionDelayMs"
+            min="${CONTINUATION_LIMITS.postActionDelayMs.min}"
+            max="${CONTINUATION_LIMITS.postActionDelayMs.max}"
+            step="50"
+            value="${effectiveSettings.continuation.postActionDelayMs}"
+            ${isSavingApprovalSettings ? 'disabled' : ''}
+          />
+        </label>
+      </section>
     `
   }
 
@@ -85,13 +193,9 @@ export function createApprovalSettingsController(
     }
   }
 
-  const handleApprovalSettingsChange = async (event: Event): Promise<void> => {
-    const target = event.target
-
-    if (!(target instanceof HTMLInputElement) || !target.matches('[data-approval-toggle]')) {
-      return
-    }
-
+  const handleApprovalsToggleChange = async (
+    target: HTMLInputElement
+  ): Promise<void> => {
     if (!window.bonzi || isSavingApprovalSettings) {
       target.checked = approvalSettings?.approvalsEnabled !== false
       return
@@ -140,6 +244,67 @@ export function createApprovalSettingsController(
     } finally {
       setSavingApprovalSettings(false)
       rerenderApprovalSettings()
+    }
+  }
+
+  const handleContinuationChange = async (
+    target: HTMLInputElement
+  ): Promise<void> => {
+    const fieldKey = target.dataset.continuationField
+
+    if (!isContinuationField(fieldKey) || !window.bonzi || isSavingApprovalSettings) {
+      rerenderApprovalSettings()
+      return
+    }
+
+    const parsed = Number.parseInt(target.value, 10)
+
+    if (!Number.isFinite(parsed)) {
+      options.setStatusMessage('Continuation value must be a valid integer.')
+      rerenderApprovalSettings()
+      return
+    }
+
+    const nextValue = clampContinuationSetting(fieldKey, parsed)
+
+    setSavingApprovalSettings(true)
+    rerenderApprovalSettings()
+    options.setStatusMessage('Updating continuation settings…')
+
+    try {
+      approvalSettings = await window.bonzi.settings.updateRuntimeApprovalSettings({
+        continuation: {
+          [fieldKey]: nextValue
+        }
+      })
+      options.onApprovalSettingsChanged(approvalSettings)
+      options.setStatusMessage('Continuation settings updated.')
+      const nextShellState = await window.bonzi.app.getShellState()
+      options.onApplyShellState(nextShellState)
+      options.onConversationNeedsRender()
+    } catch (error) {
+      options.setStatusMessage(`Failed to update continuation settings: ${String(error)}`)
+      await hydrateApprovalSettings()
+    } finally {
+      setSavingApprovalSettings(false)
+      rerenderApprovalSettings()
+    }
+  }
+
+  const handleApprovalSettingsChange = async (event: Event): Promise<void> => {
+    const target = event.target
+
+    if (!(target instanceof HTMLInputElement)) {
+      return
+    }
+
+    if (target.matches('[data-approval-toggle]')) {
+      await handleApprovalsToggleChange(target)
+      return
+    }
+
+    if (target.matches('[data-continuation-field]')) {
+      await handleContinuationChange(target)
     }
   }
 

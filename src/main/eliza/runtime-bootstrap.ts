@@ -6,6 +6,7 @@ import type { ShellState } from '../../shared/contracts'
 import { createBonziCharacter } from './bonzi-character'
 import { createBonziContextPlugin } from './bonzi-context-plugin'
 import { createBonziDesktopActionsPlugin } from './bonzi-desktop-actions-plugin'
+import { createBonziKnowledgePlugin } from './bonzi-knowledge-plugin'
 import type { BonziElizaResolvedConfig } from './config'
 import { DEFAULT_ELIZA_EMBEDDING_DIMENSION } from './embedding-dimensions'
 import type {
@@ -33,7 +34,7 @@ export async function buildRuntimePlugins(options: {
   getShellState: () => ShellState
   pluginResolver?: RuntimePluginResolver
 }): Promise<BuildRuntimePluginsResult> {
-  const plugins: Plugin[] = [localdbPlugin]
+  const plugins: Plugin[] = [localdbPlugin, createBonziKnowledgePlugin()]
 
   if (options.runtimeSettings.contextEnabled) {
     plugins.push(

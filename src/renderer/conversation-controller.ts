@@ -1,10 +1,11 @@
 import {
   type AssistantCommandResponse,
   type AssistantMessage,
+  type AssistantTurnEventPayload,
   type BonziWorkflowRunSnapshot
 } from '../shared/contracts'
 import {
-  addAssistantTurn,
+  addAssistantTurn as addAssistantResponseEntry,
   applyActionUpdate,
   conversationEntriesFromHistory,
   createMessage,
@@ -23,6 +24,8 @@ export interface ConversationController {
   hydrateConversation(messages: AssistantMessage[]): void
   addUserMessage(content: string): void
   addAssistantResponse(response: AssistantCommandResponse): void
+  addAssistantTurn(turn: AssistantTurnEventPayload): void
+  applyActionUpdate(action: AssistantTurnEventPayload['actions'][number]): void
   appendSystemMessage(content: string): void
   clearPendingConfirmations(): void
   applyWorkflowRunUpdate(run: BonziWorkflowRunSnapshot): boolean
@@ -117,6 +120,10 @@ export function createConversationController(
 
         if (response.action) {
           applyActionUpdate(conversation, response.action)
+        }
+
+        if (response.workflowRun) {
+          applyWorkflowRunUpdate(response.workflowRun)
         }
       } catch (error) {
         appendSystemMessage(`Action failed: ${String(error)}`)
@@ -246,6 +253,10 @@ export function createConversationController(
         applyActionUpdate(conversation, response.action)
       }
 
+      if (response.workflowRun) {
+        applyWorkflowRunUpdate(response.workflowRun)
+      }
+
       if (response.confirmationRequired) {
         pendingConfirmations.add(actionId)
       } else {
@@ -297,8 +308,7 @@ export function createConversationController(
       render()
     },
     addAssistantResponse: (response) => {
-      addAssistantTurn(conversation, response)
-
+      addAssistantResponseEntry(conversation, response)
       if (response.workflowRun) {
         const existingWorkflowRun = workflowRunsById.get(response.workflowRun.id)
         const latestWorkflowRun = rememberWorkflowRun(
@@ -316,6 +326,22 @@ export function createConversationController(
       }
 
       render()
+    },
+    addAssistantTurn: (turn) => {
+      const workflowRun = turn.workflowRun
+        ? rememberWorkflowRun(turn.workflowRun)
+        : undefined
+      conversation.push({
+        message: turn.message,
+        actions: turn.actions,
+        warnings: turn.warnings,
+        workflowRun
+      })
+      render()
+    },
+    applyActionUpdate: (action) => {
+      applyActionUpdate(conversation, action)
+      pendingConfirmations.delete(action.id)
     },
     appendSystemMessage,
     clearPendingConfirmations: () => {

@@ -12,11 +12,10 @@ import {
   type SettingsPanelController
 } from './settings-panel-controller'
 import { createShellStateController } from './shell-state-controller'
+import { createShellWindowInteractionController } from './shell-window-interaction-controller'
 import { createVrmController, type BuddyKind } from './vrm-controller'
 import { createWindowDragController } from './window-drag-controller'
 
-const POST_BUBBLE_PASSTHROUGH_SUPPRESSION_MS = 1500
-const RENDERER_MOUSE_IGNORE_LEASE_MS = 250
 const BUDDY_KIND_STORAGE_KEY = 'bonzi.buddyKind'
 
 export function renderApp(root: HTMLDivElement): void {
@@ -45,6 +44,7 @@ export function renderApp(root: HTMLDivElement): void {
     assistantSendButton,
     settingsPanelEl,
     characterSettingsEl,
+    knowledgeSettingsEl,
     approvalSettingsEl,
     pluginSettingsEl,
     settingsStatusEl,
@@ -53,13 +53,11 @@ export function renderApp(root: HTMLDivElement): void {
   } = elements
 
   let hasVrmError = false
-  let isWindowDragging = false
-  let areMouseEventsIgnored: boolean | null = null
-  let mouseIgnoreLeaseTimer: number | null = null
-  let mouseIgnoreLeaseId = 0
-  let mousePassthroughSuppressedUntilMs = 0
   let settingsPanelController: SettingsPanelController
   let conversationController: ConversationController
+  let shellWindowInteractionController: ReturnType<
+    typeof createShellWindowInteractionController
+  >
   let currentBuddyKind = readSavedBuddyKind()
 
   buddySelectEl.value = currentBuddyKind
@@ -68,12 +66,7 @@ export function renderApp(root: HTMLDivElement): void {
     bubbleExpiryMs,
     chatLogEl,
     onShellBubbleVisibilityChange: (visible) => {
-      if (visible) {
-        forceMouseEventsEnabled()
-        return
-      }
-
-      suppressMousePassthrough(POST_BUBBLE_PASSTHROUGH_SUPPRESSION_MS)
+      shellWindowInteractionController.handleShellBubbleVisibilityChange(visible)
     },
     shellEl
   })
@@ -91,7 +84,7 @@ export function renderApp(root: HTMLDivElement): void {
     })
 
     if (isUiVisible || hasVrmError) {
-      forceMouseEventsEnabled()
+      shellWindowInteractionController.forceMouseEventsEnabled()
     }
   }
 
@@ -120,6 +113,7 @@ export function renderApp(root: HTMLDivElement): void {
       settingsCloseButton,
       settingsPanelEl,
       characterSettingsEl,
+      knowledgeSettingsEl,
       approvalSettingsEl,
       pluginSettingsEl,
       settingsStatusEl,
@@ -142,7 +136,16 @@ export function renderApp(root: HTMLDivElement): void {
     }
   })
 
-  const vrmController = createVrmController({
+  let vrmController: ReturnType<typeof createVrmController>
+  shellWindowInteractionController = createShellWindowInteractionController({
+    hasVrmError: () => hasVrmError,
+    hitTestClientPoint: (clientX, clientY) =>
+      vrmController.hitTestClientPoint(clientX, clientY),
+    isUiVisible: () => conversationController.isUiVisible(),
+    shellEl
+  })
+
+  vrmController = createVrmController({
     disableVrm,
     elements,
     onErrorVisibilityChange: () => {
@@ -159,113 +162,11 @@ export function renderApp(root: HTMLDivElement): void {
     shellStateController
   })
 
-  function clearMouseIgnoreLeaseTimer(): void {
-    if (mouseIgnoreLeaseTimer !== null) {
-      window.clearTimeout(mouseIgnoreLeaseTimer)
-      mouseIgnoreLeaseTimer = null
-    }
-  }
-
-  function setMouseEventsIgnored(ignored: boolean): void {
-    if (areMouseEventsIgnored === ignored || !window.bonzi) {
-      return
-    }
-
-    areMouseEventsIgnored = ignored
-    window.bonzi.window.setMouseEventsIgnored(ignored)
-  }
-
-  function forceMouseEventsEnabled(): void {
-    mouseIgnoreLeaseId += 1
-    clearMouseIgnoreLeaseTimer()
-    setMouseEventsIgnored(false)
-  }
-
-  function isMousePassthroughSuppressed(): boolean {
-    return window.performance.now() < mousePassthroughSuppressedUntilMs
-  }
-
-  function suppressMousePassthrough(durationMs: number): void {
-    mousePassthroughSuppressedUntilMs = Math.max(
-      mousePassthroughSuppressedUntilMs,
-      window.performance.now() + durationMs
-    )
-    forceMouseEventsEnabled()
-  }
-
-  function requestMouseIgnoreLease(): void {
-    if (isMousePassthroughSuppressed()) {
-      forceMouseEventsEnabled()
-      return
-    }
-
-    const leaseId = ++mouseIgnoreLeaseId
-    setMouseEventsIgnored(true)
-    clearMouseIgnoreLeaseTimer()
-    mouseIgnoreLeaseTimer = window.setTimeout(() => {
-      if (leaseId !== mouseIgnoreLeaseId) {
-        return
-      }
-
-      mouseIgnoreLeaseTimer = null
-      setMouseEventsIgnored(false)
-    }, RENDERER_MOUSE_IGNORE_LEASE_MS)
-  }
-
-  function canInteractWithStageFromEvent(event: MouseEvent): boolean {
-    if (conversationController.isUiVisible() || vrmController.hasError()) {
-      return true
-    }
-
-    return vrmController.hitTestClientPoint(event.clientX, event.clientY) ?? true
-  }
-
-  function isExplicitInteractiveTarget(target: EventTarget | null): boolean {
-    return (
-      target instanceof HTMLElement &&
-      Boolean(target.closest('.speech-bubble, .command-dock, .settings-panel'))
-    )
-  }
-
-  function syncDesktopMouseEventMode(event: MouseEvent): void {
-    if (
-      conversationController.isUiVisible() ||
-      vrmController.hasError() ||
-      isWindowDragging ||
-      shellEl.classList.contains('shell--bubble-visible') ||
-      isExplicitInteractiveTarget(event.target)
-    ) {
-      forceMouseEventsEnabled()
-      return
-    }
-
-    if (isMousePassthroughSuppressed()) {
-      forceMouseEventsEnabled()
-      return
-    }
-
-    const hitTestResult = vrmController.hitTestClientPoint(
-      event.clientX,
-      event.clientY
-    )
-
-    if (hitTestResult === false) {
-      requestMouseIgnoreLease()
-      return
-    }
-
-    forceMouseEventsEnabled()
-  }
-
   const windowDragController = createWindowDragController({
-    canStartDrag: canInteractWithStageFromEvent,
+    canStartDrag: shellWindowInteractionController.canInteractWithStageFromEvent,
     onDragStateChange: (dragging) => {
-      isWindowDragging = dragging
       vrmController.setDragging(dragging)
-
-      if (dragging) {
-        forceMouseEventsEnabled()
-      }
+      shellWindowInteractionController.setWindowDragging(dragging)
     },
     stageShellEl
   })
@@ -292,6 +193,14 @@ export function renderApp(root: HTMLDivElement): void {
           conversationController.render()
         }
         return
+      case 'assistant-action-updated':
+        conversationController.applyActionUpdate(event.action)
+        conversationController.render()
+        return
+      case 'assistant-turn-created':
+        conversationController.addAssistantTurn(event.turn)
+        conversationController.setAwaitingAssistant(false)
+        return
     }
   }
 
@@ -316,7 +225,7 @@ export function renderApp(root: HTMLDivElement): void {
       return
     }
 
-    if (!canInteractWithStageFromEvent(event)) {
+    if (!shellWindowInteractionController.canInteractWithStageFromEvent(event)) {
       return
     }
 
@@ -337,6 +246,24 @@ export function renderApp(root: HTMLDivElement): void {
       settingsPanelController.setVisible(false)
       conversationController.setUiVisible(false)
     }
+  }
+
+  const handleChatLogClick = (event: MouseEvent): void => {
+    const target = event.target
+
+    if (!(target instanceof HTMLElement)) {
+      return
+    }
+
+    if (
+      target.closest(
+        'button, a, input, textarea, select, [role="button"], [data-action-card], [data-workflow-run-id]'
+      )
+    ) {
+      return
+    }
+
+    bubbleWindowLayout.dismiss()
   }
 
   const handleVrmRetryClick = (): void => {
@@ -362,12 +289,13 @@ export function renderApp(root: HTMLDivElement): void {
   }
 
   const handleWindowMouseMove = (event: MouseEvent): void => {
-    syncDesktopMouseEventMode(event)
+    shellWindowInteractionController.syncDesktopMouseEventMode(event)
   }
 
   minimizeButton.addEventListener('click', handleMinimizeClick)
   closeButton.addEventListener('click', handleCloseClick)
   stageShellEl.addEventListener('dblclick', handleStageDoubleClick)
+  chatLogEl.addEventListener('click', handleChatLogClick)
   window.addEventListener('keydown', handleWindowKeydown)
   window.addEventListener('mousemove', handleWindowMouseMove)
   vrmRetryButton.addEventListener('click', handleVrmRetryClick)
@@ -435,6 +363,7 @@ export function renderApp(root: HTMLDivElement): void {
 
     await Promise.all([
       settingsPanelController.hydrateCharacterSettings(),
+      settingsPanelController.hydrateKnowledgeSettings(),
       settingsPanelController.hydratePluginSettings({
         preserveStatus: true,
         fallbackToSavedSettings: false
@@ -475,9 +404,10 @@ export function renderApp(root: HTMLDivElement): void {
       minimizeButton.removeEventListener('click', handleMinimizeClick)
       closeButton.removeEventListener('click', handleCloseClick)
       stageShellEl.removeEventListener('dblclick', handleStageDoubleClick)
+      chatLogEl.removeEventListener('click', handleChatLogClick)
       window.removeEventListener('keydown', handleWindowKeydown)
       window.removeEventListener('mousemove', handleWindowMouseMove)
-      forceMouseEventsEnabled()
+      shellWindowInteractionController.dispose()
       vrmRetryButton.removeEventListener('click', handleVrmRetryClick)
       buddySelectEl.removeEventListener('change', handleBuddySelectChange)
       commandController.dispose()

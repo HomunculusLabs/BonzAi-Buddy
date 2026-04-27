@@ -43,6 +43,7 @@ export type AssistantActionType = (typeof ASSISTANT_ACTION_TYPES)[number]
 export type AssistantActionStatus =
   | 'pending'
   | 'needs_confirmation'
+  | 'running'
   | 'completed'
   | 'failed'
 
@@ -62,6 +63,11 @@ export interface AssistantAction {
   requiresConfirmation: boolean
   status: AssistantActionStatus
   params?: AssistantActionParams
+  workflowRunId?: string
+  workflowStepId?: string
+  commandMessageId?: string
+  continuationId?: string
+  continuationIndex?: number
   resultMessage?: string
 }
 
@@ -90,11 +96,23 @@ export interface AssistantActionExecutionResponse {
   message: string
   action?: AssistantAction
   confirmationRequired: boolean
+  continuationScheduled?: boolean
+  workflowRun?: BonziWorkflowRunSnapshot
 }
 
 export type AssistantEventEmoteId = 'wave' | 'happy-bounce'
+
+export interface AssistantTurnEventPayload {
+  message: AssistantMessage
+  actions: AssistantAction[]
+  warnings: string[]
+  workflowRun?: BonziWorkflowRunSnapshot
+  parentActionId?: string
+}
 
 export type AssistantEvent =
   | { type: 'runtime-status'; status: AssistantRuntimeStatus }
   | { type: 'play-emote'; emoteId: AssistantEventEmoteId }
   | { type: 'workflow-run-updated'; run: BonziWorkflowRunSnapshot }
+  | { type: 'assistant-action-updated'; action: AssistantAction }
+  | { type: 'assistant-turn-created'; turn: AssistantTurnEventPayload }

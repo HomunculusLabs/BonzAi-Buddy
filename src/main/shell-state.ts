@@ -14,7 +14,14 @@ export function buildShellState(
   warnings: string[],
   runtime: AssistantRuntimeStatus,
   availableActions = [...ASSISTANT_ACTION_TYPES],
-  approvals: RuntimeApprovalSettings = { approvalsEnabled: true }
+  approvals: RuntimeApprovalSettings = {
+    approvalsEnabled: true,
+    continuation: {
+      maxSteps: 6,
+      maxRuntimeMs: 120_000,
+      postActionDelayMs: 750
+    }
+  }
 ): ShellState {
   const approvalNote = approvals.approvalsEnabled
     ? 'Desktop actions remain constrained to Bonzi’s small allowlist, with confirmation still required for sensitive actions like close-window.'

@@ -16,6 +16,11 @@ import type {
   UpdateElizaCharacterSettingsRequest
 } from './contracts/character'
 import type {
+  ImportKnowledgeDocumentsRequest,
+  KnowledgeImportResult,
+  KnowledgeImportStatus
+} from './contracts/knowledge'
+import type {
   ElizaPluginDiscoveryRequest,
   ElizaPluginInstallRequest,
   ElizaPluginOperationResult,
@@ -49,7 +54,9 @@ export const IPC_CHANNELS = {
     getRuntimeApprovalSettings: 'settings:get-runtime-approval-settings',
     updateRuntimeApprovalSettings: 'settings:update-runtime-approval-settings',
     getElizaCharacterSettings: 'settings:get-eliza-character-settings',
-    updateElizaCharacterSettings: 'settings:update-eliza-character-settings'
+    updateElizaCharacterSettings: 'settings:update-eliza-character-settings',
+    importKnowledgeDocuments: 'settings:import-knowledge-documents',
+    getKnowledgeImportStatus: 'settings:get-knowledge-import-status'
   },
   plugins: {
     discover: 'plugins:discover',
@@ -106,6 +113,14 @@ export type IpcInvokeChannelMap = {
   [IPC_CHANNELS.settings.updateElizaCharacterSettings]: {
     args: [request: UpdateElizaCharacterSettingsRequest]
     response: ElizaCharacterSettings
+  }
+  [IPC_CHANNELS.settings.importKnowledgeDocuments]: {
+    args: [request: ImportKnowledgeDocumentsRequest]
+    response: KnowledgeImportResult
+  }
+  [IPC_CHANNELS.settings.getKnowledgeImportStatus]: {
+    args: []
+    response: KnowledgeImportStatus
   }
   [IPC_CHANNELS.plugins.discover]: {
     args: [request?: ElizaPluginDiscoveryRequest]
@@ -218,6 +233,10 @@ export interface BonziBridge {
     updateElizaCharacterSettings: (
       request: UpdateElizaCharacterSettingsRequest
     ) => Promise<ElizaCharacterSettings>
+    importKnowledgeDocuments: (
+      request: ImportKnowledgeDocumentsRequest
+    ) => Promise<KnowledgeImportResult>
+    getKnowledgeImportStatus: () => Promise<KnowledgeImportStatus>
   }
   plugins: {
     discover: (request?: ElizaPluginDiscoveryRequest) => Promise<ElizaPluginSettings>

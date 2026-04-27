@@ -19,6 +19,7 @@ export interface MountedAppElements {
   assistantSendButton: HTMLButtonElement
   settingsPanelEl: HTMLElement
   characterSettingsEl: HTMLElement
+  knowledgeSettingsEl: HTMLElement
   approvalSettingsEl: HTMLElement
   pluginSettingsEl: HTMLElement
   settingsStatusEl: HTMLElement
@@ -128,6 +129,27 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
             </button>
             <button
               class="settings-panel__tab"
+              data-settings-tab="knowledge"
+              id="settings-tab-knowledge"
+              type="button"
+              role="tab"
+              aria-controls="settings-pane-knowledge"
+              aria-selected="false"
+              tabindex="-1"
+            >
+              <span class="settings-panel__tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M5 3.5h10.5L19 7v13.5H5V3.5Z" />
+                  <path d="M15.5 3.5V7H19M8 11h8M8 14h8M8 17h5" class="settings-panel__tab-icon-cutout" />
+                </svg>
+              </span>
+              <span class="settings-panel__tab-copy">
+                <span class="settings-panel__tab-label">Knowledge</span>
+                <small>Markdown</small>
+              </span>
+            </button>
+            <button
+              class="settings-panel__tab"
               data-settings-tab="plugins"
               id="settings-tab-plugins"
               type="button"
@@ -195,6 +217,17 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
               hidden
             >
               <div class="settings-panel__section character-settings" data-character-settings></div>
+            </section>
+
+            <section
+              class="settings-panel__pane"
+              data-settings-pane="knowledge"
+              id="settings-pane-knowledge"
+              role="tabpanel"
+              aria-labelledby="settings-tab-knowledge"
+              hidden
+            >
+              <div class="settings-panel__section knowledge-settings" data-knowledge-settings></div>
             </section>
 
             <section
@@ -305,6 +338,9 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
   const approvalSettingsEl = root.querySelector<HTMLElement>(
     '[data-approval-settings]'
   )
+  const knowledgeSettingsEl = root.querySelector<HTMLElement>(
+    '[data-knowledge-settings]'
+  )
   const pluginSettingsEl = root.querySelector<HTMLElement>('[data-plugin-settings]')
   const settingsStatusEl = root.querySelector<HTMLElement>('[data-settings-status]')
   const buddySelectEl = root.querySelector<HTMLSelectElement>('[data-buddy-select]')
@@ -334,6 +370,7 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
     !settingsPanelEl ||
     !characterSettingsEl ||
     !approvalSettingsEl ||
+    !knowledgeSettingsEl ||
     !pluginSettingsEl ||
     !settingsStatusEl ||
     !buddySelectEl ||
@@ -363,6 +400,7 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
     assistantSendButton,
     settingsPanelEl,
     characterSettingsEl,
+    knowledgeSettingsEl,
     approvalSettingsEl,
     pluginSettingsEl,
     settingsStatusEl,

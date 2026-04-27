@@ -29,6 +29,7 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
     return {
       inventory: {},
       approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
+      continuation: DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation,
       characterSettings: getDefaultCharacterSettings(),
       needsRewrite: true,
       fileExisted: true
@@ -42,6 +43,7 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
       return {
         inventory: {},
         approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
+        continuation: DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation,
         characterSettings: getDefaultCharacterSettings(),
         needsRewrite: true,
         fileExisted: true
@@ -56,6 +58,12 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
         : DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled
 
     if (typeof parsed.approvalsEnabled !== 'boolean') {
+      needsRewrite = true
+    }
+
+    const continuation = normalizeRuntimeContinuationSettings(parsed.continuation)
+
+    if (continuation.needsRewrite) {
       needsRewrite = true
     }
 
@@ -92,6 +100,7 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
     return {
       inventory,
       approvalsEnabled,
+      continuation: continuation.settings,
       characterSettings: normalizedCharacter.settings,
       needsRewrite,
       fileExisted: true
@@ -102,6 +111,7 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
     return {
       inventory: migrateLegacyInventory(parsed),
       approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
+      continuation: DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation,
       characterSettings: getDefaultCharacterSettings(),
       needsRewrite: true,
       fileExisted: true
@@ -111,9 +121,51 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
   return {
     inventory: {},
     approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
+    continuation: DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation,
     characterSettings: getDefaultCharacterSettings(),
     needsRewrite: true,
     fileExisted: true
+  }
+}
+
+export function normalizeRuntimeContinuationSettings(value: unknown): {
+  settings: typeof DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation
+  needsRewrite: boolean
+} {
+  if (!isRecord(value)) {
+    return {
+      settings: { ...DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation },
+      needsRewrite: value !== undefined
+    }
+  }
+
+  const settings = {
+    maxSteps: clampInteger(
+      value.maxSteps,
+      1,
+      20,
+      DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation.maxSteps
+    ),
+    maxRuntimeMs: clampInteger(
+      value.maxRuntimeMs,
+      5_000,
+      600_000,
+      DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation.maxRuntimeMs
+    ),
+    postActionDelayMs: clampInteger(
+      value.postActionDelayMs,
+      0,
+      10_000,
+      DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation.postActionDelayMs
+    )
+  }
+
+  return {
+    settings,
+    needsRewrite:
+      value.maxSteps !== settings.maxSteps ||
+      value.maxRuntimeMs !== settings.maxRuntimeMs ||
+      value.postActionDelayMs !== settings.postActionDelayMs
   }
 }
 
@@ -359,6 +411,21 @@ export function getCatalogEntry(
   id: ElizaPluginId
 ): OptionalPluginCatalogEntry | undefined {
   return OPTIONAL_PLUGIN_CATALOG.find((plugin) => plugin.id === id)
+}
+
+function clampInteger(
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number
+): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+
+  if (!Number.isFinite(numeric)) {
+    return fallback
+  }
+
+  return Math.min(max, Math.max(min, Math.floor(numeric)))
 }
 
 function migrateLegacyInventory(

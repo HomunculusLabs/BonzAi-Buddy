@@ -1,10 +1,5 @@
-import {
-  AgentRuntime,
-  ChannelType,
-  LLMMode,
-  stringToUuid,
-  type UUID
-} from '@elizaos/core/node'
+import { existsSync } from 'node:fs'
+import type { AgentRuntime, UUID } from '@elizaos/core/node'
 import type {
   AssistantRuntimeStatus,
   ShellState
@@ -13,17 +8,7 @@ import { normalizeError } from '../../shared/value-utils'
 import { BonziExternalEmbeddingsService } from './external-embeddings-service'
 import type { BonziPluginRuntimeResolver } from './plugin-runtime-resolver'
 import type { BonziPluginSettingsStore } from './plugin-settings'
-import {
-  applyRuntimeSettings,
-  buildRuntimePlugins,
-  createRuntimeCharacter,
-  createRuntimeConfigSignature
-} from './runtime-bootstrap'
 import type { BonziRuntimeConfigState } from './runtime-config-state'
-
-const BONZI_WORLD_ID = stringToUuid('bonzi-world')
-const BONZI_USER_ID = stringToUuid('bonzi-user')
-const BONZI_ROOM_ID = stringToUuid('bonzi-room')
 
 export interface RuntimeBundle {
   runtime: AgentRuntime
@@ -71,6 +56,17 @@ export class BonziRuntimeLifecycle {
     return { ...this.runtimeStatus }
   }
 
+  canSkipHistoryRuntimeHydration(): boolean {
+    const config = this.configState.sync()
+
+    return (
+      config.effectiveProvider === 'eliza-classic' &&
+      !this.bundle &&
+      !this.initializing &&
+      !existsSync(this.dataDir)
+    )
+  }
+
   async waitForInitialization(): Promise<void> {
     if (this.initializing) {
       await this.initializing.catch(() => null)
@@ -86,11 +82,26 @@ export class BonziRuntimeLifecycle {
     const runtimeSettings = this.pluginSettingsStore.getRuntimeSettings()
     const runtimePluginSelection =
       this.pluginRuntimeResolver.getRuntimeSelectionMetadata()
+    const {
+      AgentRuntime,
+      ChannelType,
+      LLMMode,
+      stringToUuid
+    } = await import('@elizaos/core/node')
+    const {
+      applyRuntimeSettings,
+      buildRuntimePlugins,
+      createRuntimeCharacter,
+      createRuntimeConfigSignature
+    } = await import('./runtime-bootstrap')
     const signature = createRuntimeConfigSignature({
       config,
       runtimeSettings,
       runtimePluginSelection
     })
+    const worldId = stringToUuid('bonzi-world')
+    const userId = stringToUuid('bonzi-user')
+    const roomId = stringToUuid('bonzi-room')
 
     if (this.bundle && this.configSignature === signature) {
       this.configState.addRuntimeStartupWarnings(
@@ -132,7 +143,10 @@ export class BonziRuntimeLifecycle {
         this.configState.addRuntimeStartupWarnings(runtimePlugins.warnings)
 
         const runtime = new AgentRuntime({
-          character: createRuntimeCharacter({ config, runtimeSettings }),
+          character: createRuntimeCharacter({
+            config,
+            runtimeSettings
+          }),
           plugins: runtimePlugins.plugins,
           actionPlanning: true,
           llmMode: LLMMode.SMALL
@@ -149,9 +163,9 @@ export class BonziRuntimeLifecycle {
         await runtime.initialize()
 
         await runtime.ensureConnection({
-          entityId: BONZI_USER_ID,
-          roomId: BONZI_ROOM_ID,
-          worldId: BONZI_WORLD_ID,
+          entityId: userId,
+          roomId,
+          worldId,
           userName: 'User',
           source: 'bonzi-electron-main',
           channelId: 'chat',
@@ -160,9 +174,9 @@ export class BonziRuntimeLifecycle {
 
         const bundle: RuntimeBundle = {
           runtime,
-          userId: BONZI_USER_ID,
-          roomId: BONZI_ROOM_ID,
-          worldId: BONZI_WORLD_ID
+          userId,
+          roomId,
+          worldId
         }
 
         this.bundle = bundle

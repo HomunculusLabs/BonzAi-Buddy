@@ -10,6 +10,7 @@ import {
 } from './plugin-settings-controller'
 import { createApprovalSettingsController } from './approval-settings-controller'
 import { createCharacterSettingsController } from './character-settings-controller'
+import { createKnowledgeSettingsController } from './knowledge-settings-controller'
 import { createSettingsStatusController } from './settings-status-controller'
 
 export interface SettingsPanelController {
@@ -18,6 +19,7 @@ export interface SettingsPanelController {
   hydratePluginSettings(options?: HydratePluginSettingsOptions): Promise<void>
   hydrateApprovalSettings(): Promise<void>
   hydrateCharacterSettings(): Promise<void>
+  hydrateKnowledgeSettings(): Promise<void>
   setPluginSettings(settings: ElizaPluginSettings | null): void
   syncApprovalSettings(settings: RuntimeApprovalSettings | null): void
   getApprovalSettings(): RuntimeApprovalSettings | null
@@ -33,6 +35,7 @@ export interface SettingsPanelControllerOptions {
     | 'settingsCloseButton'
     | 'settingsPanelEl'
     | 'characterSettingsEl'
+    | 'knowledgeSettingsEl'
     | 'approvalSettingsEl'
     | 'pluginSettingsEl'
     | 'settingsStatusEl'
@@ -46,12 +49,13 @@ export interface SettingsPanelControllerOptions {
   onConversationNeedsRender(): void
 }
 
-type SettingsTabId = 'general' | 'approvals' | 'character' | 'plugins'
+type SettingsTabId = 'general' | 'approvals' | 'character' | 'knowledge' | 'plugins'
 
 const SETTINGS_TAB_IDS: SettingsTabId[] = [
   'general',
   'approvals',
   'character',
+  'knowledge',
   'plugins'
 ]
 
@@ -69,6 +73,7 @@ export function createSettingsPanelController(
     settingsCloseButton,
     settingsPanelEl,
     characterSettingsEl,
+    knowledgeSettingsEl,
     approvalSettingsEl,
     pluginSettingsEl,
     settingsStatusEl,
@@ -106,6 +111,12 @@ export function createSettingsPanelController(
     setStatusMessage: statusController.setStatusMessage,
     setRuntimeReloadPending: statusController.setRuntimeReloadPending,
     onSavingChange: statusController.setCharacterSaving
+  })
+
+  const knowledgeController = createKnowledgeSettingsController({
+    knowledgeSettingsEl,
+    setStatusMessage: statusController.setStatusMessage,
+    onSavingChange: statusController.setKnowledgeSaving
   })
 
   const pluginController = createPluginSettingsController({
@@ -225,6 +236,7 @@ export function createSettingsPanelController(
       focusActiveTabSoon()
       void approvalController.hydrateApprovalSettings()
       void characterController.hydrate()
+      void knowledgeController.hydrate()
       void pluginController.hydrate()
     }
   }
@@ -277,6 +289,7 @@ export function createSettingsPanelController(
     hydratePluginSettings: (hydrateOptions) => pluginController.hydrate(hydrateOptions),
     hydrateApprovalSettings: approvalController.hydrateApprovalSettings,
     hydrateCharacterSettings: characterController.hydrate,
+    hydrateKnowledgeSettings: knowledgeController.hydrate,
     setPluginSettings: pluginController.setPluginSettings,
     syncApprovalSettings: approvalController.syncApprovalSettings,
     getApprovalSettings: approvalController.getApprovalSettings,
@@ -292,6 +305,7 @@ export function createSettingsPanelController(
         handleApplyRuntimeChangesClick
       )
       pluginController.dispose()
+      knowledgeController.dispose()
       characterController.dispose()
       approvalController.dispose()
     }

@@ -155,6 +155,17 @@ export function registerIpcHandlers(
     }
   )
 
+  handleInvoke(
+    IPC_CHANNELS.settings.importKnowledgeDocuments,
+    async (_event, request) => {
+      return assistantService.importKnowledgeDocuments(request)
+    }
+  )
+
+  handleInvoke(IPC_CHANNELS.settings.getKnowledgeImportStatus, () => {
+    return assistantService.getKnowledgeImportStatus()
+  })
+
   handleInvoke(IPC_CHANNELS.plugins.install, async (_event, request) => {
     return assistantService.installPlugin(request)
   })

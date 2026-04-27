@@ -2,6 +2,8 @@ import type { BrowserWindow } from 'electron'
 import type {
   AssistantAction,
   AssistantActionExecutionResponse,
+  AssistantActionStatus,
+  BonziWorkflowRunSnapshot,
   RuntimeApprovalSettings,
   ShellState
 } from '../shared/contracts'
@@ -16,19 +18,176 @@ interface PendingAssistantActionsOptions {
   getCompanionWindow: () => BrowserWindow | null
   getApprovalSettings: () => RuntimeApprovalSettings
   discordBrowserService: DiscordBrowserActionService
-  recordActionObservation: (
+  linkExternalAction: (action: AssistantAction) => void
+  markExternalActionRunning: (action: AssistantAction) => void
+  onActionUpdated: (action: AssistantAction) => void
+  onActionExecutionFinished: (input: {
+    action: AssistantAction
+    resultMessage: string
+  }) => Promise<PendingActionContinuationResult>
+}
+
+interface PendingActionContinuationResult {
+  continuationScheduled: boolean
+  workflowRun?: BonziWorkflowRunSnapshot
+}
+
+interface PendingActionExecutionResult extends PendingActionContinuationResult {
+  action: AssistantAction
+}
+
+interface PendingActionExecutionEnvironment {
+  getShellState: () => ShellState
+  getCompanionWindow: () => BrowserWindow | null
+  discordBrowserService: DiscordBrowserActionService
+}
+
+interface PendingActionWorkflowHooks {
+  markExternalActionRunning: (action: AssistantAction) => void
+  onActionUpdated: (action: AssistantAction) => void
+  onActionExecutionFinished: (input: {
+    action: AssistantAction
+    resultMessage: string
+  }) => Promise<PendingActionContinuationResult>
+}
+
+class PendingAssistantActionStore {
+  private readonly pendingActions = new Map<string, AssistantAction>()
+  private executionGeneration = 0
+
+  get currentGeneration(): number {
+    return this.executionGeneration
+  }
+
+  clear(): void {
+    this.executionGeneration += 1
+    this.pendingActions.clear()
+  }
+
+  get(actionId: string): AssistantAction | undefined {
+    return this.pendingActions.get(actionId)
+  }
+
+  save(action: AssistantAction): AssistantAction {
+    this.pendingActions.set(action.id, action)
+    return action
+  }
+
+  isCurrentGeneration(generation: number): boolean {
+    return generation === this.executionGeneration
+  }
+}
+
+class PendingAssistantActionRunner {
+  constructor(
+    private readonly store: PendingAssistantActionStore,
+    private readonly environment: PendingActionExecutionEnvironment,
+    private readonly hooks: PendingActionWorkflowHooks
+  ) {}
+
+  async execute(
     action: AssistantAction,
-    message: string
-  ) => Promise<void>
+    generation: number
+  ): Promise<PendingActionExecutionResult> {
+    const runningAction = this.transition(action, 'running')
+    this.hooks.markExternalActionRunning(runningAction)
+    this.hooks.onActionUpdated(runningAction)
+
+    try {
+      const message = await executeAssistantAction(runningAction, {
+        shellState: this.environment.getShellState(),
+        companionWindow: this.environment.getCompanionWindow(),
+        discordBrowserService: this.environment.discordBrowserService
+      })
+
+      return this.finish({
+        action: runningAction,
+        generation,
+        status: 'completed',
+        resultMessage: message
+      })
+    } catch (error) {
+      const resultMessage = normalizeError(error)
+      return this.finish({
+        action: runningAction,
+        generation,
+        status: 'failed',
+        resultMessage
+      })
+    }
+  }
+
+  private transition(
+    action: AssistantAction,
+    status: AssistantActionStatus,
+    resultMessage?: string
+  ): AssistantAction {
+    const nextAction: AssistantAction = {
+      ...action,
+      status,
+      ...(resultMessage ? { resultMessage } : {})
+    }
+
+    this.store.save(nextAction)
+    return nextAction
+  }
+
+  private async finish(input: {
+    action: AssistantAction
+    generation: number
+    status: Extract<AssistantActionStatus, 'completed' | 'failed'>
+    resultMessage: string
+  }): Promise<PendingActionExecutionResult> {
+    const finishedAction: AssistantAction = {
+      ...input.action,
+      status: input.status,
+      resultMessage: input.resultMessage
+    }
+
+    if (!this.store.isCurrentGeneration(input.generation)) {
+      return {
+        action: finishedAction,
+        continuationScheduled: false
+      }
+    }
+
+    this.store.save(finishedAction)
+    const continuation = await this.hooks.onActionExecutionFinished({
+      action: finishedAction,
+      resultMessage: input.resultMessage
+    })
+    this.hooks.onActionUpdated(finishedAction)
+
+    return {
+      action: finishedAction,
+      continuationScheduled: continuation.continuationScheduled,
+      workflowRun: continuation.workflowRun
+    }
+  }
 }
 
 export class PendingAssistantActions {
-  private readonly pendingActions = new Map<string, AssistantAction>()
+  private readonly store = new PendingAssistantActionStore()
+  private readonly runner: PendingAssistantActionRunner
 
-  constructor(private readonly options: PendingAssistantActionsOptions) {}
+  constructor(private readonly options: PendingAssistantActionsOptions) {
+    this.runner = new PendingAssistantActionRunner(
+      this.store,
+      {
+        getShellState: options.getShellState,
+        getCompanionWindow: options.getCompanionWindow,
+        discordBrowserService: options.discordBrowserService
+      },
+      {
+        markExternalActionRunning: options.markExternalActionRunning,
+        onActionUpdated: options.onActionUpdated,
+        onActionExecutionFinished: options.onActionExecutionFinished
+      }
+    )
+  }
 
   clear(): void {
-    this.pendingActions.clear()
+    this.store.clear()
   }
 
   async createActionsForRuntimeTurn(
@@ -38,17 +197,18 @@ export class PendingAssistantActions {
     const actions: AssistantAction[] = []
 
     for (const proposal of proposals) {
-      const pendingAction = createPendingAssistantAction(proposal, approvalSettings)
-      this.pendingActions.set(pendingAction.id, pendingAction)
+      const pendingAction = this.createPendingAction(proposal, approvalSettings)
 
       if (approvalSettings.approvalsEnabled) {
         actions.push(pendingAction)
         continue
       }
 
-      const executedAction = await this.executePendingAction(pendingAction)
-      this.pendingActions.set(executedAction.id, executedAction)
-      actions.push(executedAction)
+      const executed = await this.runner.execute(
+        pendingAction,
+        this.store.currentGeneration
+      )
+      actions.push(executed.action)
     }
 
     return actions
@@ -58,7 +218,7 @@ export class PendingAssistantActions {
     actionId: string
     confirmed: boolean
   }): Promise<AssistantActionExecutionResponse> {
-    const action = this.pendingActions.get(request.actionId)
+    const action = this.store.get(request.actionId)
 
     if (!action) {
       return {
@@ -68,72 +228,84 @@ export class PendingAssistantActions {
       }
     }
 
-    if (action.status === 'completed') {
+    const unavailableResponse = this.buildUnavailableExecutionResponse(action)
+    if (unavailableResponse) {
+      return unavailableResponse
+    }
+
+    const confirmationResponse = this.requestConfirmationIfNeeded(action, request)
+    if (confirmationResponse) {
+      return confirmationResponse
+    }
+
+    const executed = await this.runner.execute(action, this.store.currentGeneration)
+    return {
+      ok: executed.action.status === 'completed',
+      action: executed.action,
+      message: executed.action.resultMessage ?? 'Action finished.',
+      confirmationRequired: false,
+      continuationScheduled: executed.continuationScheduled,
+      workflowRun: executed.workflowRun
+    }
+  }
+
+  private createPendingAction(
+    proposal: BonziProposedAction,
+    approvalSettings: RuntimeApprovalSettings
+  ): AssistantAction {
+    const pendingAction = createPendingAssistantAction(proposal, approvalSettings)
+    this.store.save(pendingAction)
+    this.options.linkExternalAction(pendingAction)
+    return pendingAction
+  }
+
+  private buildUnavailableExecutionResponse(
+    action: AssistantAction
+  ): AssistantActionExecutionResponse | null {
+    if (action.status === 'completed' || action.status === 'failed') {
       return {
-        ok: true,
+        ok: action.status === 'completed',
         action,
-        message: action.resultMessage ?? 'Action already completed.',
+        message: action.resultMessage ?? 'Action already finished.',
         confirmationRequired: false
       }
     }
 
-    const approvalsEnabled = this.options.getApprovalSettings().approvalsEnabled
-
-    if (approvalsEnabled && action.requiresConfirmation && !request.confirmed) {
-      const awaitingConfirmation: AssistantAction = {
-        ...action,
-        status: 'needs_confirmation'
-      }
-
-      this.pendingActions.set(awaitingConfirmation.id, awaitingConfirmation)
-
+    if (action.status === 'running') {
       return {
         ok: false,
-        action: awaitingConfirmation,
-        message: 'Confirmation required. Run the action again to approve it.',
-        confirmationRequired: true
+        action,
+        message: 'Action is already running.',
+        confirmationRequired: false
       }
     }
 
-    const executedAction = await this.executePendingAction(action)
-    this.pendingActions.set(executedAction.id, executedAction)
-
-    return {
-      ok: executedAction.status === 'completed',
-      action: executedAction,
-      message: executedAction.resultMessage ?? 'Action finished.',
-      confirmationRequired: false
-    }
+    return null
   }
 
-  private async executePendingAction(action: AssistantAction): Promise<AssistantAction> {
-    try {
-      const message = await executeAssistantAction(action, {
-        shellState: this.options.getShellState(),
-        companionWindow: this.options.getCompanionWindow(),
-        discordBrowserService: this.options.discordBrowserService
-      })
+  private requestConfirmationIfNeeded(
+    action: AssistantAction,
+    request: { confirmed: boolean }
+  ): AssistantActionExecutionResponse | null {
+    const approvalsEnabled = this.options.getApprovalSettings().approvalsEnabled
 
-      const completedAction: AssistantAction = {
-        ...action,
-        status: 'completed',
-        resultMessage: message
-      }
+    if (!approvalsEnabled || !action.requiresConfirmation || request.confirmed) {
+      return null
+    }
 
-      await this.options.recordActionObservation(completedAction, message)
-      return completedAction
-    } catch (error) {
-      const failedAction: AssistantAction = {
-        ...action,
-        status: 'failed',
-        resultMessage: normalizeError(error)
-      }
+    const awaitingConfirmation: AssistantAction = {
+      ...action,
+      status: 'needs_confirmation'
+    }
 
-      await this.options.recordActionObservation(
-        failedAction,
-        failedAction.resultMessage ?? 'Action failed.'
-      )
-      return failedAction
+    this.store.save(awaitingConfirmation)
+    this.options.onActionUpdated(awaitingConfirmation)
+
+    return {
+      ok: false,
+      action: awaitingConfirmation,
+      message: 'Confirmation required. Run the action again to approve it.',
+      confirmationRequired: true
     }
   }
 }

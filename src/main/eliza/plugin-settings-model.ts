@@ -4,7 +4,8 @@ import type {
   ElizaOptionalPluginId,
   ElizaPluginExecutionPolicy,
   ElizaPluginLifecycleStatus,
-  ElizaPluginSource
+  ElizaPluginSource,
+  RuntimeContinuationSettings
 } from '../../shared/contracts'
 
 export interface SanitizedBonziMessageExample {
@@ -43,6 +44,7 @@ export interface BonziElizaPluginRuntimeSettings {
   contextEnabled: boolean
   desktopActionsEnabled: boolean
   approvalsEnabled: boolean
+  continuation: RuntimeContinuationSettings
   character: {
     enabled: boolean
     characterJson: string
@@ -85,10 +87,17 @@ export interface BonziPersistedPluginRecordSnapshot {
   capabilities?: string[]
 }
 
+export interface PersistedRuntimeContinuationSettings {
+  maxSteps?: number
+  maxRuntimeMs?: number
+  postActionDelayMs?: number
+}
+
 export interface PersistedSettingsFileV2 {
   schemaVersion: 2
   plugins: Record<string, PersistedPluginRecord>
   approvalsEnabled?: boolean
+  continuation?: PersistedRuntimeContinuationSettings
   character?: PersistedCharacterSettings
 }
 
@@ -104,6 +113,7 @@ export type NormalizedPluginInventory = Record<string, PersistedPluginRecord>
 export interface LoadedSettingsState {
   inventory: NormalizedPluginInventory
   approvalsEnabled: boolean
+  continuation: RuntimeContinuationSettings
   characterSettings: NormalizedCharacterSettings
   needsRewrite: boolean
   fileExisted: boolean
@@ -142,6 +152,11 @@ export const DEFAULT_PLUGIN_RUNTIME_SETTINGS: BonziElizaPluginRuntimeSettings = 
   contextEnabled: true,
   desktopActionsEnabled: true,
   approvalsEnabled: true,
+  continuation: {
+    maxSteps: 6,
+    maxRuntimeMs: 120_000,
+    postActionDelayMs: 750
+  },
   character: {
     enabled: DEFAULT_CHARACTER_SETTINGS.enabled,
     characterJson: DEFAULT_CHARACTER_SETTINGS.characterJson,

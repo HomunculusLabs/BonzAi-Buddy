@@ -118,11 +118,10 @@ function normalizeRegistryPluginEntry(item: unknown): RegistryPluginEntry | null
     ...(supportsMetadata ? readCompatibilityRecord(supportsMetadata) ?? [] : []),
     ...readNpmCompatibilityMetadata(npmMetadata)
   ])
-  const incompatible =
-    item.compatible === false ||
-    item.supported === false ||
-    compatibilityMeta.includes('compatible:false') ||
-    compatibilityMeta.includes('supported:false')
+  const lifecycleStatus = deriveRegistryLifecycleStatus({
+    item,
+    compatibilityMeta
+  })
 
   const name =
     readString(item.name) ??
@@ -162,13 +161,28 @@ function normalizeRegistryPluginEntry(item: unknown): RegistryPluginEntry | null
         []
     ),
     source: 'registry',
-    lifecycleStatus: incompatible ? 'incompatible' : 'available',
+    lifecycleStatus,
     executionPolicy: 'confirm_each_action',
-    warnings: incompatible
-      ? [...warnings, 'Registry marked this plugin as incompatible.']
-      : warnings,
+    warnings:
+      lifecycleStatus === 'incompatible'
+        ? [...warnings, 'Registry marked this plugin as incompatible.']
+        : warnings,
     errors
   }
+}
+
+export function deriveRegistryLifecycleStatus(input: {
+  item: Record<string, unknown>
+  compatibilityMeta: readonly string[]
+}): ElizaPluginLifecycleStatus {
+  const { item, compatibilityMeta } = input
+  const incompatible =
+    item.compatible === false ||
+    item.supported === false ||
+    compatibilityMeta.includes('compatible:false') ||
+    compatibilityMeta.includes('supported:false')
+
+  return incompatible ? 'incompatible' : 'available'
 }
 
 function dedupeRegistryEntries(entries: RegistryPluginEntry[]): RegistryPluginEntry[] {

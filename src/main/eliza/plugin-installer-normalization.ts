@@ -1,4 +1,8 @@
-import type { ElizaPluginInstallRequest, ElizaPluginUninstallRequest } from '../../shared/contracts'
+import {
+  derivePluginInstallEligibility,
+  type ElizaPluginInstallRequest,
+  type ElizaPluginUninstallRequest
+} from '../../shared/contracts'
 import { normalizeOptionalString } from '../../shared/value-utils'
 import type {
   NormalizedInstallRequest,
@@ -10,8 +14,13 @@ export function normalizeInstallRequest(
 ): NormalizedInstallRequest {
   const packageName = normalizeOptionalString(request.packageName)
 
-  if (!packageName) {
-    throw new Error('Install request must include a packageName.')
+  const eligibility = derivePluginInstallEligibility({
+    packageName,
+    lifecycleStatus: request.lifecycleStatus
+  })
+
+  if (!eligibility.eligible || !packageName) {
+    throw new Error(eligibility.reason ?? 'Plugin is not eligible for install.')
   }
 
   return {

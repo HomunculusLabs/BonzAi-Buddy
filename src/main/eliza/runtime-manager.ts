@@ -2,9 +2,11 @@ import { app, type BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import {
   ASSISTANT_ACTION_TYPES,
+  type AssistantAction,
   type AssistantActionType,
   type AssistantEvent,
   type AssistantMessage,
+  type AssistantTurnEventPayload,
   type AssistantProviderInfo,
   type AssistantRuntimeStatus,
   type BonziWorkflowRunSnapshot,
@@ -14,6 +16,9 @@ import {
   type ElizaPluginOperationResult,
   type ElizaPluginSettings,
   type ElizaPluginUninstallRequest,
+  type ImportKnowledgeDocumentsRequest,
+  type KnowledgeImportResult,
+  type KnowledgeImportStatus,
   type RuntimeApprovalSettings,
   type ShellState,
   type UpdateElizaCharacterSettingsRequest,
@@ -35,7 +40,11 @@ import {
   BonziRuntimeTurnRunner,
   type BonziRuntimeTurn
 } from './runtime-turn-runner'
-import { BonziWorkflowManager } from './workflow-manager'
+import {
+  BonziWorkflowManager,
+  type WorkflowExternalActionState
+} from './workflow-manager'
+import { isTerminalRunStatus } from './workflow-snapshot-utils'
 
 export type { BonziProposedAction } from './runtime-action-proposals'
 export type { BonziRuntimeTurn } from './runtime-turn-runner'
@@ -134,7 +143,9 @@ export class BonziRuntimeManager {
       }
     })
     this.memoryService = new BonziRuntimeMemoryService({
-      getRuntime: () => this.lifecycle.getOrCreateRuntime()
+      getRuntime: () => this.lifecycle.getOrCreateRuntime(),
+      canSkipHistoryRuntimeHydration: () =>
+        this.lifecycle.canSkipHistoryRuntimeHydration()
     })
     this.turnRunner = new BonziRuntimeTurnRunner({
       configState: this.configState,
@@ -191,6 +202,16 @@ export class BonziRuntimeManager {
     const settings = this.pluginSettingsStore.updateCharacterSettings(request)
     this.lifecycle.invalidateConfigSignature()
     return settings
+  }
+
+  importKnowledgeDocuments(
+    request: ImportKnowledgeDocumentsRequest
+  ): Promise<KnowledgeImportResult> {
+    return this.memoryService.importKnowledgeDocuments(request)
+  }
+
+  getKnowledgeImportStatus(): KnowledgeImportStatus {
+    return this.memoryService.getKnowledgeImportStatus()
   }
 
   async discoverPlugins(
@@ -294,6 +315,123 @@ export class BonziRuntimeManager {
     params?: unknown
   }, resultMessage: string): Promise<void> {
     return this.memoryService.recordActionObservation(action, resultMessage)
+  }
+
+  linkExternalAction(action: AssistantAction): BonziWorkflowRunSnapshot | null {
+    if (!action.workflowRunId || !action.workflowStepId) {
+      return null
+    }
+
+    return this.workflowManager.linkExternalAction({
+      runId: action.workflowRunId,
+      stepId: action.workflowStepId,
+      actionId: action.id
+    })
+  }
+
+  markExternalActionRunning(action: AssistantAction): BonziWorkflowRunSnapshot | null {
+    if (!action.workflowRunId || !action.workflowStepId) {
+      return null
+    }
+
+    return this.workflowManager.runExternalAction({
+      runId: action.workflowRunId,
+      stepId: action.workflowStepId,
+      detail: `Running ${action.title}.`
+    })
+  }
+
+  async recordExternalActionObservation(
+    action: AssistantAction,
+    resultMessage: string
+  ): Promise<{
+    workflowRun?: BonziWorkflowRunSnapshot
+    shouldConsiderContinuation: boolean
+  }> {
+    await this.memoryService.recordActionObservation(action, resultMessage)
+
+    if (!action.workflowRunId || !action.workflowStepId) {
+      return { shouldConsiderContinuation: false }
+    }
+
+    const workflowRun =
+      action.status === 'failed'
+        ? this.workflowManager.failExternalAction({
+            runId: action.workflowRunId,
+            stepId: action.workflowStepId,
+            detail: resultMessage
+          })
+        : this.workflowManager.completeExternalAction({
+            runId: action.workflowRunId,
+            stepId: action.workflowStepId,
+            detail: resultMessage
+          })
+
+    if (!workflowRun) {
+      return { shouldConsiderContinuation: false }
+    }
+
+    return {
+      workflowRun,
+      shouldConsiderContinuation:
+        !isTerminalRunStatus(workflowRun.status) &&
+        workflowRun.status !== 'cancel_requested'
+    }
+  }
+
+  async continueWorkflowAfterAction(input: {
+    action: AssistantAction
+    observation: string
+    continuationIndex: number
+  }): Promise<BonziRuntimeTurn | null> {
+    const runId = input.action.workflowRunId
+
+    if (!runId) {
+      return null
+    }
+
+    const run = this.workflowManager.getRun(runId)
+
+    if (!run || isTerminalRunStatus(run.status) || run.status === 'cancel_requested') {
+      return null
+    }
+
+    return this.turnRunner.continueWorkflow({
+      runId,
+      action: input.action,
+      observation: input.observation,
+      continuationIndex: input.continuationIndex
+    })
+  }
+
+  getExternalActionState(runId: string): WorkflowExternalActionState {
+    return this.workflowManager.getExternalActionState(runId)
+  }
+
+  hasOpenExternalActions(runId: string): boolean {
+    return this.workflowManager.hasOpenExternalActions(runId)
+  }
+
+  hasAwaitingExternalActions(runId: string): boolean {
+    return this.hasOpenExternalActions(runId)
+  }
+
+  failWorkflowRun(runId: string, error: string): BonziWorkflowRunSnapshot | null {
+    return this.workflowManager.failRun(runId, { error })
+  }
+
+  emitAssistantActionUpdated(action: AssistantAction): void {
+    this.events.emit({
+      type: 'assistant-action-updated',
+      action
+    })
+  }
+
+  emitAssistantTurnCreated(turn: AssistantTurnEventPayload): void {
+    this.events.emit({
+      type: 'assistant-turn-created',
+      turn
+    })
   }
 
   async sendCommand(command: string): Promise<BonziRuntimeTurn> {

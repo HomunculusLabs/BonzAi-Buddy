@@ -33,7 +33,11 @@ export function appendWorkflowStep(
 export function markWorkflowRunRunning(
   run: BonziWorkflowRunSnapshot
 ): BonziWorkflowRunSnapshot {
-  if (run.status === 'queued' || run.status === 'awaiting_user') {
+  if (
+    run.status === 'queued' ||
+    run.status === 'awaiting_user' ||
+    run.status === 'awaiting_external_action'
+  ) {
     return {
       ...run,
       status: 'running'
@@ -59,7 +63,9 @@ export function transitionWorkflowStep(
   return {
     ...run,
     status:
-      run.status === 'awaiting_user' || run.status === 'queued'
+      run.status === 'awaiting_user' ||
+      run.status === 'awaiting_external_action' ||
+      run.status === 'queued'
         ? 'running'
         : run.status,
     steps: run.steps.map((step) => {
@@ -78,6 +84,115 @@ export function transitionWorkflowStep(
             : step.detail
       }
     })
+  }
+}
+
+export function appendExternalActionWorkflowStep(
+  run: BonziWorkflowRunSnapshot,
+  step: BonziWorkflowStepSnapshot
+): BonziWorkflowRunSnapshot {
+  if (isTerminalRunStatus(run.status)) {
+    return run
+  }
+
+  return {
+    ...run,
+    status: 'awaiting_external_action',
+    steps: [
+      ...run.steps,
+      {
+        ...step,
+        status: 'awaiting_external_action',
+        finishedAt: undefined
+      }
+    ]
+  }
+}
+
+export function linkWorkflowExternalAction(
+  run: BonziWorkflowRunSnapshot,
+  input: { stepId: string; actionId: string }
+): BonziWorkflowRunSnapshot {
+  if (isTerminalRunStatus(run.status)) {
+    return run
+  }
+
+  return {
+    ...run,
+    steps: run.steps.map((step) =>
+      step.id === input.stepId
+        ? { ...step, externalActionId: clampText(input.actionId, 256) }
+        : step
+    )
+  }
+}
+
+export function startWorkflowExternalAction(
+  run: BonziWorkflowRunSnapshot,
+  input: { stepId: string; detail?: string },
+  context: WorkflowTransitionContext
+): BonziWorkflowRunSnapshot {
+  return transitionExternalActionStep(run, input, 'running', context)
+}
+
+export function completeWorkflowExternalAction(
+  run: BonziWorkflowRunSnapshot,
+  input: { stepId: string; detail?: string },
+  context: WorkflowTransitionContext
+): BonziWorkflowRunSnapshot {
+  return transitionExternalActionStep(run, input, 'completed', context)
+}
+
+export function failWorkflowExternalAction(
+  run: BonziWorkflowRunSnapshot,
+  input: { stepId: string; detail?: string },
+  context: WorkflowTransitionContext
+): BonziWorkflowRunSnapshot {
+  return transitionExternalActionStep(run, input, 'failed', context)
+}
+
+function transitionExternalActionStep(
+  run: BonziWorkflowRunSnapshot,
+  input: { stepId: string; detail?: string },
+  status: Extract<BonziWorkflowStepStatus, 'running' | 'completed' | 'failed'>,
+  context: WorkflowTransitionContext
+): BonziWorkflowRunSnapshot {
+  if (isTerminalRunStatus(run.status)) {
+    return run
+  }
+
+  let found = false
+  const steps = run.steps.map((step) => {
+    if (step.id !== input.stepId || isTerminalStepStatus(step.status)) {
+      return step
+    }
+
+    found = true
+    return {
+      ...step,
+      status,
+      updatedAt: context.nowIso,
+      finishedAt: isTerminalStepStatus(status) ? context.nowIso : undefined,
+      detail:
+        input.detail !== undefined
+          ? clampOptionalText(input.detail, WORKFLOW_TEXT_LIMIT)
+          : step.detail
+    }
+  })
+
+  if (!found) {
+    return run
+  }
+
+  const hasAwaitingExternalAction = steps.some(
+    (step) =>
+      Boolean(step.externalActionType) && step.status === 'awaiting_external_action'
+  )
+
+  return {
+    ...run,
+    status: hasAwaitingExternalAction ? 'awaiting_external_action' : 'running',
+    steps
   }
 }
 

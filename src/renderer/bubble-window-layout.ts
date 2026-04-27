@@ -9,6 +9,7 @@ const BASE_WINDOW_HEIGHT = 640
 const BUBBLE_WINDOW_TOP_MARGIN = 16
 const BUBBLE_WINDOW_BOTTOM_SPACE = 356
 const BUBBLE_TAIL_HEIGHT = 18
+const BUBBLE_DISMISS_ANIMATION_MS = 180
 const WINDOW_RESIZE_EPSILON = 4
 
 export interface BubbleWindowLayoutSyncArgs {
@@ -19,6 +20,7 @@ export interface BubbleWindowLayoutSyncArgs {
 }
 
 export interface BubbleWindowLayoutController {
+  dismiss(): void
   sync(args: BubbleWindowLayoutSyncArgs): void
   dispose(): void
 }
@@ -32,8 +34,10 @@ export function createBubbleWindowLayoutController(options: {
   const { chatLogEl, shellEl } = options
   const bubbleExpiryMs = options.bubbleExpiryMs ?? BUBBLE_EXPIRY_MS
   let isBubbleVisible = false
+  let isBubbleDismissing = false
   let lastShellBubbleVisible: boolean | null = null
   let bubbleExpiryTimer: number | null = null
+  let bubbleDismissTimer: number | null = null
   let bubbleResizeFrame: number | null = null
   let lastArgs: BubbleWindowLayoutSyncArgs = {
     entries: [],
@@ -49,6 +53,13 @@ export function createBubbleWindowLayoutController(options: {
     }
   }
 
+  const clearBubbleDismissal = (): void => {
+    if (bubbleDismissTimer !== null) {
+      window.clearTimeout(bubbleDismissTimer)
+      bubbleDismissTimer = null
+    }
+  }
+
   const syncUiVisibility = (args: BubbleWindowLayoutSyncArgs): void => {
     const nextShellBubbleVisible =
       args.isUiVisible ||
@@ -59,6 +70,7 @@ export function createBubbleWindowLayoutController(options: {
     shellEl.classList.toggle('shell--ui-hidden', !args.isUiVisible)
     shellEl.classList.toggle('shell--ui-active', args.isUiVisible)
     shellEl.classList.toggle('shell--bubble-visible', nextShellBubbleVisible)
+    shellEl.classList.toggle('shell--bubble-dismissing', isBubbleDismissing)
 
     if (lastShellBubbleVisible !== nextShellBubbleVisible) {
       lastShellBubbleVisible = nextShellBubbleVisible
@@ -86,6 +98,7 @@ export function createBubbleWindowLayoutController(options: {
     const hasVisibleBubble =
       lastArgs.isUiVisible ||
       isBubbleVisible ||
+      isBubbleDismissing ||
       lastArgs.isAwaitingAssistant ||
       lastArgs.hasVrmError
     const visibleBubbleHeight = hasVisibleBubble
@@ -144,12 +157,44 @@ export function createBubbleWindowLayoutController(options: {
     })
   }
 
+  const hideBubble = (options: { animated: boolean }): void => {
+    if (!isBubbleVisible && !isBubbleDismissing) {
+      return
+    }
+
+    isBubbleVisible = false
+
+    if (!options.animated) {
+      clearBubbleDismissal()
+      isBubbleDismissing = false
+      syncUiVisibility(lastArgs)
+      syncWindowBoundsToBubble()
+      return
+    }
+
+    if (isBubbleDismissing) {
+      return
+    }
+
+    isBubbleDismissing = true
+    syncUiVisibility(lastArgs)
+
+    bubbleDismissTimer = window.setTimeout(() => {
+      bubbleDismissTimer = null
+      isBubbleDismissing = false
+      syncUiVisibility(lastArgs)
+      syncWindowBoundsToBubble()
+    }, BUBBLE_DISMISS_ANIMATION_MS)
+  }
+
   const refreshBubbleVisibility = (
     args: BubbleWindowLayoutSyncArgs
   ): void => {
     clearBubbleExpiry()
 
     if (args.isAwaitingAssistant) {
+      clearBubbleDismissal()
+      isBubbleDismissing = false
       isBubbleVisible = true
       return
     }
@@ -157,10 +202,12 @@ export function createBubbleWindowLayoutController(options: {
     const activeEntry = getActiveConversationEntry(args.entries)
 
     if (!activeEntry) {
-      isBubbleVisible = false
+      hideBubble({ animated: false })
       return
     }
 
+    clearBubbleDismissal()
+    isBubbleDismissing = false
     isBubbleVisible = true
 
     if (args.isUiVisible || hasPendingBubbleActions(activeEntry)) {
@@ -172,13 +219,25 @@ export function createBubbleWindowLayoutController(options: {
         return
       }
 
-      isBubbleVisible = false
-      syncUiVisibility(lastArgs)
-      syncWindowBoundsToBubble()
+      hideBubble({ animated: true })
     }, bubbleExpiryMs)
   }
 
   return {
+    dismiss() {
+      clearBubbleExpiry()
+
+      if (
+        lastArgs.isUiVisible ||
+        lastArgs.isAwaitingAssistant ||
+        lastArgs.hasVrmError ||
+        !isBubbleVisible
+      ) {
+        return
+      }
+
+      hideBubble({ animated: true })
+    },
     sync(args) {
       lastArgs = args
       refreshBubbleVisibility(args)
@@ -187,6 +246,7 @@ export function createBubbleWindowLayoutController(options: {
     },
     dispose() {
       clearBubbleExpiry()
+      clearBubbleDismissal()
 
       if (bubbleResizeFrame !== null) {
         window.cancelAnimationFrame(bubbleResizeFrame)

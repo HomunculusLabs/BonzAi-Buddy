@@ -106,17 +106,6 @@ p {
   transform: translateX(-50%);
 }
 
-.shell--ui-hidden.shell--bubble-visible .stage-shell {
-  top: auto;
-  bottom: 12px;
-  height: 462px;
-}
-
-.shell--ui-hidden:not(.shell--bubble-visible) .stage-shell {
-  top: 24px;
-  bottom: 12px;
-}
-
 .shell--ui-active.shell--bubble-visible .speech-bubble-shell {
   top: 16px;
   bottom: 356px;
@@ -127,10 +116,16 @@ p {
   transform: translateX(-50%);
 }
 
-.shell--ui-active.shell--bubble-visible .stage-shell {
-  top: auto;
-  bottom: 64px;
-  height: 420px;
+.shell.shell--bubble-dismissing .speech-bubble-shell {
+  top: 16px;
+  bottom: 356px;
+  left: 50%;
+  right: auto;
+  width: fit-content;
+  max-width: calc(100vw - 40px);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(-6px) scale(0.98);
 }
 
 .titlebar {
@@ -569,6 +564,45 @@ p {
   background: rgba(140, 87, 255, 0.08);
 }
 
+.approval-continuation-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
+.approval-continuation-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.approval-continuation-field__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.approval-continuation-field__copy strong {
+  color: rgba(249, 250, 255, 0.94);
+  font-size: 0.82rem;
+}
+
+.approval-continuation-field__copy small {
+  color: rgba(226, 231, 255, 0.68);
+  font-size: 0.72rem;
+}
+
+.approval-continuation-field__input {
+  width: 130px;
+  padding: 7px 9px;
+  border: 1px solid rgba(188, 198, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(8, 11, 22, 0.9);
+  color: rgba(249, 250, 255, 0.94);
+}
+
 .character-settings__intro,
 .character-settings__topline,
 .character-settings__form-grid {
@@ -739,6 +773,106 @@ p {
   white-space: nowrap;
 }
 
+.knowledge-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.knowledge-settings__card,
+.knowledge-settings__status,
+.knowledge-settings__results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
+.knowledge-settings__file-field {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: rgba(249, 250, 255, 0.9);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.knowledge-settings__file-field small,
+.knowledge-settings__empty,
+.knowledge-settings__status p,
+.knowledge-settings__result-list small {
+  display: block;
+  color: rgba(221, 229, 255, 0.58);
+  font-size: 0.69rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.knowledge-settings__file-field input {
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px dashed rgba(188, 198, 255, 0.22);
+  border-radius: 14px;
+  background: rgba(7, 10, 18, 0.68);
+  color: rgba(248, 249, 255, 0.92);
+}
+
+.knowledge-settings__file-list,
+.knowledge-settings__result-list,
+.knowledge-settings__errors {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.knowledge-settings__file-list li,
+.knowledge-settings__result-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.knowledge-settings__stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.knowledge-settings__stats div {
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: rgba(126, 215, 255, 0.08);
+}
+
+.knowledge-settings__stats dt {
+  color: rgba(221, 229, 255, 0.56);
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.knowledge-settings__stats dd {
+  margin: 3px 0 0;
+  color: rgba(249, 250, 255, 0.94);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.knowledge-settings__errors li {
+  color: rgba(255, 204, 214, 0.92);
+  font-size: 0.7rem;
+}
+
 .plugin-settings__group {
   display: flex;
   flex-direction: column;
@@ -887,7 +1021,7 @@ p {
 
   .settings-panel__nav {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 8px;
     overflow-x: visible;
     padding: 10px;
@@ -938,12 +1072,14 @@ p {
   .plugin-card,
   .plugin-row,
   .companion-settings__field,
-  .settings-toggle-card {
+  .settings-toggle-card,
+  .approval-continuation-field {
     grid-template-columns: 1fr;
   }
 
   .settings-panel__apply,
-  .companion-settings__select {
+  .companion-settings__select,
+  .approval-continuation-field__input {
     width: 100%;
   }
 
@@ -964,8 +1100,9 @@ p {
   position: absolute;
   left: 0;
   right: 0;
-  top: 138px;
-  bottom: 76px;
+  top: auto;
+  bottom: 12px;
+  height: min(462px, calc(100% - 36px));
   min-height: 0;
   overflow: hidden;
   background: transparent;
@@ -1059,7 +1196,10 @@ p {
   align-items: flex-end;
   transform: none;
   pointer-events: none;
-  transition: opacity 160ms ease;
+  transition:
+    opacity 180ms ease,
+    transform 180ms cubic-bezier(0.2, 0, 0, 1);
+  will-change: opacity, transform;
 }
 
 .speech-bubble {
@@ -1479,11 +1619,6 @@ p {
 
   .shell--ui-hidden.shell--bubble-visible .speech-bubble-shell {
     bottom: 258px;
-  }
-
-  .stage-shell {
-    top: 126px;
-    bottom: 68px;
   }
 }
 

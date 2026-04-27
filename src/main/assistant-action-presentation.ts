@@ -110,6 +110,13 @@ export function createPendingAssistantAction(
         : description,
     requiresConfirmation,
     status: 'pending',
-    ...(params ? { params } : {})
+    ...(params ? { params } : {}),
+    ...(action.workflowRunId ? { workflowRunId: action.workflowRunId } : {}),
+    ...(action.workflowStepId ? { workflowStepId: action.workflowStepId } : {}),
+    ...(action.commandMessageId ? { commandMessageId: action.commandMessageId } : {}),
+    ...(action.continuationId ? { continuationId: action.continuationId } : {}),
+    ...(typeof action.continuationIndex === 'number'
+      ? { continuationIndex: action.continuationIndex }
+      : {})
   }
 }

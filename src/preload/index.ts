@@ -64,7 +64,11 @@ const bonziApi = {
     getElizaCharacterSettings: () =>
       invoke(IPC_CHANNELS.settings.getElizaCharacterSettings),
     updateElizaCharacterSettings: (request) =>
-      invoke(IPC_CHANNELS.settings.updateElizaCharacterSettings, request)
+      invoke(IPC_CHANNELS.settings.updateElizaCharacterSettings, request),
+    importKnowledgeDocuments: (request) =>
+      invoke(IPC_CHANNELS.settings.importKnowledgeDocuments, request),
+    getKnowledgeImportStatus: () =>
+      invoke(IPC_CHANNELS.settings.getKnowledgeImportStatus)
   },
   plugins: {
     discover: (request) => invoke(IPC_CHANNELS.plugins.discover, request),

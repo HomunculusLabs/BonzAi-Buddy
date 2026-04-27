@@ -15,6 +15,9 @@ export const WORKFLOW_TEXT_LIMIT = 2_000
 export const WORKFLOW_COMMAND_LIMIT = 2_000
 export const WORKFLOW_STEP_TITLE_LIMIT = 200
 export const WORKFLOW_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000
+export const WORKFLOW_CONTINUATION_MAX_STEPS_DEFAULT = 6
+export const WORKFLOW_CONTINUATION_MAX_RUNTIME_MS_DEFAULT = 120_000
+export const WORKFLOW_POST_ACTION_DELAY_MS_DEFAULT = 750
 
 export function normalizePersistedRun(value: unknown): BonziWorkflowRunSnapshot | null {
   if (!isRecord(value)) {
@@ -101,7 +104,11 @@ export function normalizeStep(value: unknown): BonziWorkflowStepSnapshot | null 
     approvalApproved:
       typeof value.approvalApproved === 'boolean'
         ? value.approvalApproved
-        : undefined
+        : undefined,
+    externalActionId: clampOptionalText(value.externalActionId, 256),
+    externalActionType: clampOptionalText(value.externalActionType, 128),
+    continuationId: clampOptionalText(value.continuationId, 256),
+    continuationIndex: normalizeNonNegativeInteger(value.continuationIndex)
   }
 }
 
@@ -168,6 +175,7 @@ export function normalizeRunStatus(value: unknown): BonziWorkflowRunStatus | nul
     value === 'queued' ||
     value === 'running' ||
     value === 'awaiting_user' ||
+    value === 'awaiting_external_action' ||
     value === 'cancel_requested' ||
     value === 'cancelled' ||
     value === 'completed' ||
@@ -186,6 +194,7 @@ export function normalizeStepStatus(value: unknown): BonziWorkflowStepStatus | n
     value === 'running' ||
     value === 'awaiting_user' ||
     value === 'awaiting_approval' ||
+    value === 'awaiting_external_action' ||
     value === 'cancel_requested' ||
     value === 'cancelled' ||
     value === 'skipped' ||
@@ -217,6 +226,16 @@ export function normalizePositiveInteger(value: unknown): number | undefined {
   const numeric = typeof value === 'number' ? value : Number(value)
 
   if (!Number.isFinite(numeric) || numeric < 1) {
+    return undefined
+  }
+
+  return Math.floor(numeric)
+}
+
+export function normalizeNonNegativeInteger(value: unknown): number | undefined {
+  const numeric = typeof value === 'number' ? value : Number(value)
+
+  if (!Number.isFinite(numeric) || numeric < 0) {
     return undefined
   }
 

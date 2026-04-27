@@ -21,6 +21,9 @@ import {
   type ElizaPluginOperationResult,
   type ElizaPluginSettings,
   type ElizaPluginUninstallRequest,
+  type ImportKnowledgeDocumentsRequest,
+  type KnowledgeImportResult,
+  type KnowledgeImportStatus,
   type UpdateElizaCharacterSettingsRequest,
   type UpdateElizaPluginSettingsRequest,
   type UpdateRuntimeApprovalSettingsRequest,
@@ -36,6 +39,7 @@ import {
 } from './assistant-request-normalization'
 import { createDiscordBrowserServiceFromEnv } from './discord-browser-service'
 import { PendingAssistantActions } from './pending-assistant-actions'
+import { BonziWorkflowContinuationCoordinator } from './workflow-continuation-coordinator'
 
 interface AssistantServiceOptions {
   getCompanionWindow: () => BrowserWindow | null
@@ -55,6 +59,10 @@ export interface AssistantService {
   updateCharacterSettings: (
     request: UpdateElizaCharacterSettingsRequest
   ) => Promise<ElizaCharacterSettings>
+  importKnowledgeDocuments: (
+    request: ImportKnowledgeDocumentsRequest
+  ) => Promise<KnowledgeImportResult>
+  getKnowledgeImportStatus: () => KnowledgeImportStatus
   discoverPlugins: (
     request?: ElizaPluginDiscoveryRequest
   ) => Promise<ElizaPluginSettings>
@@ -98,13 +106,28 @@ export function createAssistantService(
     getCompanionWindow: options.getCompanionWindow,
     discordBrowserService
   })
+  let continuationCoordinator: BonziWorkflowContinuationCoordinator
   const pendingActions = new PendingAssistantActions({
     getShellState: options.getShellState,
     getCompanionWindow: options.getCompanionWindow,
     getApprovalSettings: () => runtimeManager.getRuntimeApprovalSettings(),
     discordBrowserService,
-    recordActionObservation: (action, message) =>
-      runtimeManager.recordActionObservation(action, message)
+    linkExternalAction: (action) => {
+      runtimeManager.linkExternalAction(action)
+    },
+    markExternalActionRunning: (action) => {
+      runtimeManager.markExternalActionRunning(action)
+    },
+    onActionUpdated: (action) => {
+      runtimeManager.emitAssistantActionUpdated(action)
+    },
+    onActionExecutionFinished: (input) =>
+      continuationCoordinator.handleActionExecutionFinished(input)
+  })
+  continuationCoordinator = new BonziWorkflowContinuationCoordinator({
+    runtimeManager,
+    pendingActions,
+    createAssistantMessage
   })
 
   return {
@@ -124,6 +147,9 @@ export function createAssistantService(
     ): Promise<ElizaCharacterSettings> {
       return runtimeManager.updateCharacterSettings(request)
     },
+    importKnowledgeDocuments: (request) =>
+      runtimeManager.importKnowledgeDocuments(request),
+    getKnowledgeImportStatus: () => runtimeManager.getKnowledgeImportStatus(),
     discoverPlugins: (request) => runtimeManager.discoverPlugins(request),
     updatePluginSettings: (request) => runtimeManager.updatePluginSettings(request),
     installPlugin: (request) => runtimeManager.installPlugin(request),
@@ -131,10 +157,12 @@ export function createAssistantService(
     getAvailableActionTypes: () => runtimeManager.getAvailableActionTypes(),
     getHistory: () => runtimeManager.getHistory(),
     async resetConversation(): Promise<void> {
+      continuationCoordinator.dispose()
       pendingActions.clear()
       await runtimeManager.resetConversation()
     },
     async reloadRuntime(): Promise<AssistantRuntimeStatus> {
+      continuationCoordinator.dispose()
       pendingActions.clear()
       return runtimeManager.reloadRuntime()
     },
@@ -220,13 +248,17 @@ export function createAssistantService(
           runtimeTurn.actions
         )
 
+        const latestWorkflowRun = runtimeTurn.workflowRun?.id
+          ? runtimeManager.getWorkflowRun(runtimeTurn.workflowRun.id) ?? runtimeTurn.workflowRun
+          : undefined
+
         return {
           ok: true,
           provider: runtimeManager.getProviderInfo(),
           reply: createAssistantMessage('assistant', runtimeTurn.reply),
           actions,
           warnings: [...runtimeManager.getStartupWarnings(), ...runtimeTurn.warnings],
-          workflowRun: runtimeTurn.workflowRun
+          workflowRun: latestWorkflowRun
         }
       } catch (error) {
         return {
@@ -254,6 +286,7 @@ export function createAssistantService(
       return pendingActions.execute(normalizedRequest)
     },
     async dispose(): Promise<void> {
+      continuationCoordinator.dispose()
       pendingActions.clear()
       await runtimeManager.dispose()
       await discordBrowserService.dispose()

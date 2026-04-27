@@ -23,6 +23,11 @@ export interface BonziProposedAction {
   description?: string
   requiresConfirmation?: boolean
   params?: AssistantActionParams
+  workflowRunId?: string
+  workflowStepId?: string
+  commandMessageId?: string
+  continuationId?: string
+  continuationIndex?: number
 }
 
 export function extractBonziActionsFromContent(

@@ -8,6 +8,7 @@ import type {
 import { dedupeStrings } from '../../shared/value-utils'
 import type { BonziPersistedPluginRecordSnapshot } from './plugin-settings'
 import type { RegistryPluginEntry } from './plugin-registry-normalization'
+import { canonicalizePluginLifecycleStatus } from './plugin-settings-normalization'
 
 interface PluginDiscoveryState {
   installedById: Map<string, ElizaInstalledPluginEntry>
@@ -347,25 +348,10 @@ function deriveLifecycleStatus(options: {
   enabled: boolean
   fallback?: ElizaPluginLifecycleStatus
 }): ElizaPluginLifecycleStatus {
-  if (options.fallback) {
-    if (options.fallback === 'removed') {
-      return 'available'
-    }
-
-    if (options.fallback === 'error') {
-      return 'load_failed'
-    }
-
-    if (options.fallback !== 'unknown') {
-      return options.fallback
-    }
-  }
-
-  if (!options.installed) {
-    return 'available'
-  }
-
-  return options.enabled ? 'enabled' : 'installed'
+  return canonicalizePluginLifecycleStatus(options.fallback, {
+    installed: options.installed,
+    enabled: options.enabled
+  })
 }
 
 function fallbackString(primary: string, fallback: string): string {

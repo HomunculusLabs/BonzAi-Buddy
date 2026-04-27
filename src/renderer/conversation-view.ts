@@ -60,6 +60,7 @@ function isCurrentWorkflowStep(step: BonziWorkflowStepSnapshot): boolean {
   return (
     step.status === 'running' ||
     step.status === 'awaiting_approval' ||
+    step.status === 'awaiting_external_action' ||
     step.status === 'awaiting_user' ||
     step.status === 'cancel_requested'
   )
@@ -68,13 +69,7 @@ function isCurrentWorkflowStep(step: BonziWorkflowStepSnapshot): boolean {
 function getCurrentWorkflowStep(
   run: BonziWorkflowRunSnapshot
 ): BonziWorkflowStepSnapshot | null {
-  for (const step of run.steps) {
-    if (isCurrentWorkflowStep(step)) {
-      return step
-    }
-  }
-
-  return run.steps.at(-1) ?? null
+  return run.steps.find((step) => isCurrentWorkflowStep(step)) ?? null
 }
 
 function shouldRenderWorkflowRun(
@@ -91,6 +86,9 @@ function renderWorkflowSummary(
   const failedCount = run.steps.filter((step) => step.status === 'failed').length
   const awaitingApprovalCount = run.steps.filter(
     (step) => step.status === 'awaiting_approval'
+  ).length
+  const awaitingExternalActionCount = run.steps.filter(
+    (step) => step.status === 'awaiting_external_action'
   ).length
 
   if (run.status === 'completed') {
@@ -111,6 +109,10 @@ function renderWorkflowSummary(
     return 'Workflow interrupted'
   }
 
+  if (awaitingExternalActionCount > 0) {
+    return `Waiting for Bonzi action card to run${awaitingExternalActionCount === 1 ? '' : 's'}`
+  }
+
   if (awaitingApprovalCount > 0 && !options.approvalsEnabled) {
     return 'Approvals disabled; continuing automatically'
   }
@@ -119,7 +121,15 @@ function renderWorkflowSummary(
     return `Waiting for approval on ${awaitingApprovalCount} step${awaitingApprovalCount === 1 ? '' : 's'}`
   }
 
-  return `${completedCount}/${run.steps.length} steps completed`
+  if (run.status === 'running') {
+    return completedCount > 0
+      ? `${completedCount}/${run.steps.length} steps finished; continuing workflow`
+      : 'Workflow is running'
+  }
+
+  return completedCount > 0
+    ? `${completedCount}/${run.steps.length} steps finished; workflow is not complete yet`
+    : labelForWorkflowStatus(run.status)
 }
 
 function renderWorkflowRun(
@@ -203,7 +213,13 @@ function renderWorkflowRun(
         <span class="workflow-card__run-status">${escapeHtml(labelForWorkflowStatus(run.status))}</span>
       </header>
       <p class="workflow-card__summary">${escapeHtml(renderWorkflowSummary(run, options))}</p>
-      ${currentStep ? `<p class="workflow-card__current">Current step: ${escapeHtml(currentStep.title)}</p>` : ''}
+      ${
+        currentStep
+          ? `<p class="workflow-card__current">Current step: ${escapeHtml(currentStep.title)}</p>`
+          : !isTerminalWorkflowRunStatus(run.status)
+            ? '<p class="workflow-card__current">Bonzi is preparing the next step…</p>'
+            : ''
+      }
       ${run.error ? `<p class="workflow-card__error">${escapeHtml(run.error)}</p>` : ''}
       <ol class="workflow-card__steps">
         ${stepMarkup}
@@ -251,7 +267,9 @@ export function hasPendingBubbleActions(
     return false
   }
 
-  const hasPendingActions = entry.actions.some((action) => action.status !== 'completed')
+  const hasPendingActions = entry.actions.some(
+    (action) => action.status !== 'completed' && action.status !== 'failed'
+  )
   const hasActiveWorkflowRun =
     shouldRenderWorkflowRun(entry.workflowRun) &&
     !isTerminalWorkflowRunStatus(entry.workflowRun.status)
@@ -309,7 +327,11 @@ export function renderConversation(
               const label =
                 action.status === 'completed'
                   ? 'Completed'
-                  : options.approvalsEnabled &&
+                  : action.status === 'failed'
+                    ? 'Failed'
+                    : action.status === 'running'
+                      ? 'Running…'
+                      : options.approvalsEnabled &&
                     action.requiresConfirmation &&
                       pendingConfirmations.has(action.id)
                     ? 'Approve & run'
@@ -318,7 +340,13 @@ export function renderConversation(
                       : 'Run action'
 
               return `
-                <div class="action-chip" data-action-card>
+                <div
+                  class="action-chip"
+                  data-action-card
+                  data-action-status="${escapeHtml(action.status)}"
+                  data-workflow-run-id="${escapeHtml(action.workflowRunId ?? '')}"
+                  data-workflow-step-id="${escapeHtml(action.workflowStepId ?? '')}"
+                >
                   <div class="action-chip__copy">
                     <strong>${escapeHtml(action.title)}</strong>
                     <p>${escapeHtml(action.description)}</p>
@@ -329,7 +357,7 @@ export function renderConversation(
                     class="ghost-button"
                     type="button"
                     data-action-id="${escapeHtml(action.id)}"
-                    ${action.status === 'completed' ? 'disabled' : ''}
+                    ${action.status === 'completed' || action.status === 'failed' || action.status === 'running' ? 'disabled' : ''}
                   >
                     ${escapeHtml(label)}
                   </button>

@@ -1,4 +1,8 @@
-import { type ElizaCharacterSettings } from '../shared/contracts'
+import {
+  ELIZA_CHARACTER_EDITABLE_STYLE_FIELDS,
+  type ElizaCharacterEditableStyleField,
+  type ElizaCharacterSettings
+} from '../shared/contracts'
 import { escapeHtml } from './html-utils'
 
 interface CharacterSettingsControllerOptions {
@@ -28,6 +32,14 @@ interface CharacterEditorDraft {
 }
 
 type DraftSource = 'form' | 'json'
+
+type CharacterStyleDraftField = 'styleAllText' | 'styleChatText' | 'stylePostText'
+
+const STYLE_DRAFT_FIELD_MAP = {
+  all: 'styleAllText',
+  chat: 'styleChatText',
+  post: 'stylePostText'
+} as const satisfies Record<ElizaCharacterEditableStyleField, CharacterStyleDraftField>
 
 interface DraftSnapshot {
   enabled: boolean
@@ -106,7 +118,6 @@ export function createCharacterSettingsController(
     const jsonInput = characterSettingsEl.querySelector<HTMLTextAreaElement>(
       '[data-character-json]'
     )
-
     if (enabledInput) {
       draftEnabled = enabledInput.checked
     }
@@ -263,7 +274,7 @@ export function createCharacterSettingsController(
             type="button"
             data-character-reset
             ${disabled}
-          >Reset</button>
+          >Reset Character</button>
         </div>
       </div>
 
@@ -325,7 +336,7 @@ export function createCharacterSettingsController(
       <details class="character-settings__advanced settings-card" ${draftSource === 'json' ? 'open' : ''}>
         <summary>Advanced raw editable character JSON</summary>
         <p class="settings-panel__section-copy">
-          This mirrors the structured editor. Unsupported runtime fields such as plugins, actions, providers, settings, clients, and secrets are rejected by Bonzi.
+          This mirrors the structured editor. Unsupported runtime fields such as plugins, actions, providers, settings, clients, secrets, and character knowledge sources are rejected by Bonzi. Import Markdown knowledge from the Knowledge tab instead.
         </p>
         <textarea
           id="eliza-character-json"
@@ -480,8 +491,10 @@ export function createCharacterSettingsController(
       if (settings) {
         draft = createDraftFromCharacterJson(settings.defaultCharacterJson, '{}')
       }
-      void submit({ enabled: false, characterJson: '{}' }, defaultJson, () =>
-        restoreDraftSnapshot(snapshot)
+      void submit(
+        { enabled: false, characterJson: '{}' },
+        defaultJson,
+        () => restoreDraftSnapshot(snapshot)
       )
     }
   }
@@ -607,9 +620,7 @@ function createDraftFromRecord(record: Record<string, unknown>): CharacterEditor
     postExamplesText: readStringArray(record.postExamples).join('\n'),
     topicsText: readStringArray(record.topics).join('\n'),
     adjectivesText: readStringArray(record.adjectives).join('\n'),
-    styleAllText: readStringArray(style.all).join('\n'),
-    styleChatText: readStringArray(style.chat).join('\n'),
-    stylePostText: readStringArray(style.post).join('\n')
+    ...createStyleDraftFromRecord(style)
   }
 }
 
@@ -630,15 +641,39 @@ function createCharacterJsonFromDraft(draft: CharacterEditorDraft): string {
       postExamples: splitLines(draft.postExamplesText),
       topics: splitLines(draft.topicsText),
       adjectives: splitLines(draft.adjectivesText),
-      style: {
-        all: splitLines(draft.styleAllText),
-        chat: splitLines(draft.styleChatText),
-        post: splitLines(draft.stylePostText)
-      }
+      style: createStyleRecordFromDraft(draft)
     },
     null,
     2
   )
+}
+
+function createStyleDraftFromRecord(
+  style: Record<string, unknown>
+): Pick<CharacterEditorDraft, CharacterStyleDraftField> {
+  const styleDraft: Pick<CharacterEditorDraft, CharacterStyleDraftField> = {
+    styleAllText: '',
+    styleChatText: '',
+    stylePostText: ''
+  }
+
+  for (const field of ELIZA_CHARACTER_EDITABLE_STYLE_FIELDS) {
+    styleDraft[STYLE_DRAFT_FIELD_MAP[field]] = readStringArray(style[field]).join('\n')
+  }
+
+  return styleDraft
+}
+
+function createStyleRecordFromDraft(
+  draft: CharacterEditorDraft
+): Record<ElizaCharacterEditableStyleField, string[]> {
+  const style = {} as Record<ElizaCharacterEditableStyleField, string[]>
+
+  for (const field of ELIZA_CHARACTER_EDITABLE_STYLE_FIELDS) {
+    style[field] = splitLines(draft[STYLE_DRAFT_FIELD_MAP[field]])
+  }
+
+  return style
 }
 
 function parseJsonArray(value: string, label: string): unknown[] {

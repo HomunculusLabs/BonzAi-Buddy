@@ -1,6 +1,8 @@
-import type {
-  ElizaCharacterSettings,
-  UpdateElizaCharacterSettingsRequest
+import {
+  ELIZA_CHARACTER_EDITABLE_TOP_LEVEL_FIELDS,
+  isElizaCharacterEditableStyleField,
+  type ElizaCharacterSettings,
+  type UpdateElizaCharacterSettingsRequest
 } from '../../shared/contracts'
 import { isRecord } from '../../shared/value-utils'
 import {
@@ -23,17 +25,9 @@ const MAX_STRING_ARRAY_ENTRY_LENGTH = 2_000
 const MAX_MESSAGE_EXAMPLE_CONVERSATIONS = 10
 const MAX_MESSAGE_EXAMPLE_MESSAGES = 20
 
-const ALLOWED_TOP_LEVEL_FIELDS = new Set([
-  'name',
-  'system',
-  'bio',
-  'lore',
-  'messageExamples',
-  'postExamples',
-  'topics',
-  'adjectives',
-  'style'
-])
+const ALLOWED_TOP_LEVEL_FIELDS: ReadonlySet<string> = new Set(
+  ELIZA_CHARACTER_EDITABLE_TOP_LEVEL_FIELDS
+)
 
 const DISALLOWED_KEYS = new Set([
   '__proto__',
@@ -118,7 +112,7 @@ export function normalizePersistedCharacterSettings(value: unknown): {
         value.characterJson !== settings.characterJson
     }
   } catch {
-    return invalidPersistedCharacterSettings('Stored Eliza character JSON was invalid and was reset.')
+    return invalidPersistedCharacterSettings('Stored Eliza character settings were invalid and were reset.')
   }
 }
 
@@ -178,6 +172,10 @@ function parseCharacterJson(characterJson: string): unknown {
     const message = error instanceof Error ? error.message : String(error)
     throw new Error(`Eliza character JSON is invalid: ${message}`)
   }
+}
+
+function normalizeLineEndings(value: string): string {
+  return value.replace(/\r\n?/gu, '\n')
 }
 
 function sanitizeCharacterOverride(value: unknown): SanitizedBonziCharacterOverride {
@@ -266,7 +264,7 @@ function normalizeStyle(
   }
 
   for (const key of Object.keys(value)) {
-    if (key !== 'all' && key !== 'chat' && key !== 'post') {
+    if (!isElizaCharacterEditableStyleField(key)) {
       throw new Error(`Unsupported Eliza character style field: ${key}`)
     }
   }
@@ -463,6 +461,12 @@ function assertNoDisallowedKeys(value: unknown, path = 'character'): void {
 
   for (const [key, nestedValue] of Object.entries(value)) {
     if (DISALLOWED_KEYS.has(key)) {
+      if (key === 'knowledge') {
+        throw new Error(
+          'Eliza character knowledge sources are not supported. Import Markdown from the Knowledge settings tab instead.'
+        )
+      }
+
       throw new Error(`Unsupported Eliza character field at ${path}.${key}.`)
     }
 

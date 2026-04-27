@@ -1,6 +1,7 @@
 export * from './contracts/assistant'
 export * from './contracts/approvals'
 export * from './contracts/character'
+export * from './contracts/knowledge'
 export * from './contracts/plugins'
 export * from './contracts/workflow'
 export * from './contracts/shell'
