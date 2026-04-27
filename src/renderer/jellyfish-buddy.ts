@@ -10,6 +10,7 @@ export interface JellyfishEmoteState {
 
 export interface JellyfishMotionState {
   activeEmote: JellyfishEmoteState | null
+  animationElapsed: number
   doubleClickStartAt: number
   dragReleaseStartAt: number
   isDragging: boolean
@@ -38,12 +39,14 @@ type JellyfishTentacleStyle = 'ribbon' | 'filament' | 'oralArm'
 interface JellyfishTentacle {
   angle: number
   baseRadius: number
+  centers: THREE.Vector3[]
   geometry: THREE.BufferGeometry
   length: number
   phase: number
   positions: Float32Array
   segmentCount: number
   style: JellyfishTentacleStyle
+  tipWidth: number
   waveScale: number
   width: number
 }
@@ -64,13 +67,17 @@ export interface JellyfishBuddyHandle {
   dispose(): void
 }
 
-const PRIMARY_TENTACLE_COUNT = 14
-const ORAL_ARM_COUNT = 7
-const SECONDARY_FILAMENT_COUNT = 32
-const TENTACLE_SEGMENTS = 36
+const PRIMARY_TENTACLE_COUNT = 10
+const ORAL_ARM_COUNT = 6
+const SECONDARY_FILAMENT_COUNT = 14
+const TENTACLE_SEGMENTS = 24
 const SWIM_BURST_DURATION_SECONDS = 1.18
 const DRAG_RELEASE_DURATION_SECONDS = 0.92
 const DOUBLE_CLICK_BURST_DURATION_SECONDS = 1.05
+const ribbonTangentScratch = new THREE.Vector3()
+const ribbonViewScratch = new THREE.Vector3()
+const ribbonSideScratch = new THREE.Vector3()
+const filamentCenterScratch = new THREE.Vector3()
 
 export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
   const root = new THREE.Group()
@@ -83,19 +90,15 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
 
   const bellMaterial = new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
+    depthTest: true,
     depthWrite: false,
-    emissive: 0x2a6fff,
-    clearcoat: 0.08,
-    clearcoatRoughness: 0.35,
+    emissive: 0x2d8dff,
     emissiveIntensity: 0.18,
-    ior: 1.33,
     metalness: 0,
-    opacity: 0.38,
-    roughness: 0.22,
+    opacity: 0.42,
+    roughness: 0.32,
     side: THREE.DoubleSide,
-    thickness: 0.24,
     transparent: true,
-    transmission: 0.3,
     vertexColors: true
   })
 
@@ -109,7 +112,7 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
     createBellGeometry(),
     new THREE.MeshBasicMaterial({
       blending: THREE.AdditiveBlending,
-      color: 0xdff8ff,
+      color: 0xc8edff,
       depthTest: true,
       depthWrite: false,
       opacity: 0.105,
@@ -119,8 +122,8 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
     })
   )
   innerBell.name = 'Jellyfish faint inner bell'
-  innerBell.position.y = 0.1
-  innerBell.scale.set(0.58, 0.5, 0.58)
+  innerBell.position.y = 0.075
+  innerBell.scale.set(0.74, 0.58, 0.74)
   innerBell.renderOrder = 28
   bellPivot.add(innerBell)
 
@@ -132,7 +135,7 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
     createScallopedRimGeometry(),
     new THREE.MeshBasicMaterial({
       blending: THREE.AdditiveBlending,
-      color: 0xb7efff,
+      color: 0x86ccff,
       depthWrite: false,
       opacity: 0.12,
       transparent: true,
@@ -148,14 +151,15 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
     new THREE.SphereGeometry(0.2, 24, 12),
     new THREE.MeshBasicMaterial({
       blending: THREE.AdditiveBlending,
-      color: 0xffd8f2,
+      color: 0x9edcff,
       depthWrite: false,
-      opacity: 0.055,
+      opacity: 0.04,
       transparent: true
     })
   )
   oralGlow.name = 'Jellyfish warm oral glow'
-  oralGlow.scale.set(0.55, 0.82, 0.42)
+  oralGlow.renderOrder = 20
+  oralGlow.scale.set(0.46, 0.68, 0.36)
   oralGlow.position.y = -0.01
   bellPivot.add(oralGlow)
 
@@ -163,54 +167,68 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
     new THREE.SphereGeometry(0.28, 24, 16),
     new THREE.MeshBasicMaterial({
       blending: THREE.AdditiveBlending,
-      color: 0x7c9cff,
+      color: 0x4f9dff,
       depthWrite: false,
       opacity: 0.055,
       transparent: true
     })
   )
-  coreGlow.name = 'Jellyfish soft core glow'
+  coreGlow.name = 'Jellyfish soft crown glow'
+  coreGlow.renderOrder = 40
   coreGlow.scale.set(0.72, 0.42, 0.72)
   coreGlow.position.y = 0.16
   bellPivot.add(coreGlow)
 
-  const glowLight = new THREE.PointLight(0x7ddfff, 1.2, 3.2, 2.2)
+  const glowLight = new THREE.PointLight(0x5ecbff, 1.2, 3.2, 2.2)
   glowLight.name = 'Jellyfish glow light'
   glowLight.position.set(0, 0.02, 0.1)
   root.add(glowLight)
 
   const tentacleRibbonMaterial = new THREE.MeshBasicMaterial({
     blending: THREE.AdditiveBlending,
-    color: 0xbfefff,
+    color: 0x9bddff,
     depthTest: true,
     depthWrite: false,
-    opacity: 0.24,
+    opacity: 0.18,
     side: THREE.DoubleSide,
     transparent: true
   })
   const oralArmMaterial = new THREE.MeshBasicMaterial({
     blending: THREE.AdditiveBlending,
-    color: 0xeaf9ff,
+    color: 0xb7e9ff,
     depthTest: true,
     depthWrite: false,
-    opacity: 0.24,
+    opacity: 0.2,
     side: THREE.DoubleSide,
     transparent: true
   })
   const filamentMaterial = new THREE.LineBasicMaterial({
     blending: THREE.AdditiveBlending,
-    color: 0xf1fdff,
+    color: 0xd7f4ff,
     depthTest: true,
     depthWrite: false,
     opacity: 0.075,
     transparent: true
   })
 
+  const underBellRoot = new THREE.Group()
+  underBellRoot.name = 'Jellyfish under-bell root'
+  root.add(underBellRoot)
+
+  const oralCoreGroup = new THREE.Group()
+  oralCoreGroup.name = 'Jellyfish oral core ribbons'
+  underBellRoot.add(oralCoreGroup)
+
+  const tentacleRoot = new THREE.Group()
+  tentacleRoot.name = 'Jellyfish layered tentacle field'
+  underBellRoot.add(tentacleRoot)
+
   const tentacles: JellyfishTentacle[] = []
 
   for (let index = 0; index < PRIMARY_TENTACLE_COUNT; index += 1) {
-    const angle = clusteredTentacleAngle(index, PRIMARY_TENTACLE_COUNT, 5, 0.28, 0.12)
+    const angle = clusteredTentacleAngle(index, PRIMARY_TENTACLE_COUNT, 4, 0.3, 0.12)
     const segmentCount = TENTACLE_SEGMENTS
+    const centers = createTentacleCenters(segmentCount)
     const positions = new Float32Array((segmentCount + 1) * 2 * 3)
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
@@ -219,18 +237,20 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
 
     const ribbon = new THREE.Mesh(geometry, tentacleRibbonMaterial)
     ribbon.name = 'Jellyfish translucent ribbon tentacle'
-    ribbon.renderOrder = 10
-    root.add(ribbon)
+    ribbon.renderOrder = 14
+    tentacleRoot.add(ribbon)
 
     tentacles.push({
       angle,
       baseRadius: index % 4 === 0 ? 0.16 : index % 2 === 0 ? 0.24 : 0.34,
+      centers,
       geometry,
       length: index % 7 === 0 ? 1.68 : index % 5 === 0 ? 1.45 : index % 3 === 0 ? 1.18 : 0.88,
       phase: index * 0.82,
       positions,
       segmentCount,
       style: 'ribbon',
+      tipWidth: 0.0025 + (index % 3) * 0.001,
       waveScale: 0.48 + (index % 4) * 0.07,
       width: 0.018 + (index % 4) * 0.004
     })
@@ -239,6 +259,7 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
   for (let index = 0; index < ORAL_ARM_COUNT; index += 1) {
     const angle = clusteredTentacleAngle(index, ORAL_ARM_COUNT, ORAL_ARM_COUNT, 0.24, 0.44)
     const segmentCount = Math.round(TENTACLE_SEGMENTS * 0.65)
+    const centers = createTentacleCenters(segmentCount)
     const positions = new Float32Array((segmentCount + 1) * 2 * 3)
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
@@ -247,26 +268,29 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
 
     const oralArm = new THREE.Mesh(geometry, oralArmMaterial)
     oralArm.name = 'Jellyfish curled oral arm'
-    oralArm.renderOrder = 16
-    root.add(oralArm)
+    oralArm.renderOrder = 18
+    oralCoreGroup.add(oralArm)
 
     tentacles.push({
       angle,
       baseRadius: 0.035 + (index % 3) * 0.035,
+      centers,
       geometry,
-      length: 0.62 + (index % 4) * 0.11,
+      length: index % 5 === 0 ? 0.86 : 0.56 + (index % 4) * 0.1,
       phase: index * 1.12 + 0.7,
       positions,
       segmentCount,
       style: 'oralArm',
+      tipWidth: 0.018 + (index % 3) * 0.006,
       waveScale: 1.08 + (index % 3) * 0.13,
-      width: 0.072 + (index % 3) * 0.016
+      width: 0.062 + (index % 3) * 0.02
     })
   }
 
   for (let index = 0; index < SECONDARY_FILAMENT_COUNT; index += 1) {
-    const angle = clusteredTentacleAngle(index, SECONDARY_FILAMENT_COUNT, 5, 0.38, 0.28)
+    const angle = clusteredTentacleAngle(index, SECONDARY_FILAMENT_COUNT, 4, 0.42, 0.28)
     const segmentCount = TENTACLE_SEGMENTS
+    const centers = createTentacleCenters(segmentCount)
     const positions = new Float32Array((segmentCount + 1) * 3)
     const geometry = new THREE.BufferGeometry()
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
@@ -274,18 +298,20 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
 
     const line = new THREE.Line(geometry, filamentMaterial)
     line.name = 'Jellyfish fine filament'
-    line.renderOrder = 12
-    root.add(line)
+    line.renderOrder = 10
+    tentacleRoot.add(line)
 
     tentacles.push({
       angle,
-      baseRadius: index % 5 === 0 ? 0.22 : 0.32 + (index % 3) * 0.035,
+      baseRadius: index % 6 === 0 ? 0.18 : index % 5 === 0 ? 0.24 : 0.31 + (index % 3) * 0.04,
+      centers,
       geometry,
       length: index % 9 === 0 ? 1.92 : index % 7 === 0 ? 1.62 : index % 4 === 0 ? 1.34 : 1.02,
       phase: index * 0.58 + 0.4,
       positions,
       segmentCount,
       style: 'filament',
+      tipWidth: 0,
       waveScale: 0.34 + (index % 4) * 0.05,
       width: 0
     })
@@ -300,6 +326,7 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
   scene.add(root)
 
   const motionState = createJellyfishMotionState(0)
+  const cameraLocalPosition = new THREE.Vector3()
 
   const update = (
     delta: number,
@@ -307,9 +334,14 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
     pointerNdc: THREE.Vector2,
     cameraWorldPosition: THREE.Vector3
   ): void => {
+    motionState.animationElapsed = Math.min(
+      elapsed,
+      motionState.animationElapsed + Math.min(delta, 1 / 30)
+    )
+    const visualElapsed = motionState.animationElapsed
     const pose = evaluateJellyfishFrame({
       delta,
-      elapsed,
+      elapsed: visualElapsed,
       pointerNdc,
       state: motionState
     })
@@ -327,9 +359,9 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
 
     bellPivot.scale.copy(pose.bellPivotScale)
     innerBell.scale.set(
-      0.58 * pose.bellDetailsScale.x,
-      0.5 * pose.bellDetailsScale.y,
-      0.58 * pose.bellDetailsScale.z
+      0.74 * pose.bellDetailsScale.x,
+      0.58 * pose.bellDetailsScale.y,
+      0.74 * pose.bellDetailsScale.z
     )
     skirt.scale.copy(pose.skirtScale)
     bellDetails.root.scale.copy(pose.bellDetailsScale)
@@ -339,13 +371,13 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
     glowLight.intensity = pose.glowLightIntensity
 
     root.updateMatrixWorld(true)
-    const cameraLocalPosition = cameraWorldPosition.clone()
+    cameraLocalPosition.copy(cameraWorldPosition)
     root.worldToLocal(cameraLocalPosition)
 
     for (const tentacle of tentacles) {
       updateTentacle(
         tentacle,
-        elapsed,
+        visualElapsed,
         pose.bellPivotScale.y,
         pose.tentacleEnergy,
         pose.tentacleWaveSway,
@@ -404,6 +436,7 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
 export function createJellyfishMotionState(elapsed: number): JellyfishMotionState {
   return {
     activeEmote: null,
+    animationElapsed: elapsed,
     doubleClickStartAt: Number.NEGATIVE_INFINITY,
     dragReleaseStartAt: Number.NEGATIVE_INFINITY,
     isDragging: false,
@@ -417,13 +450,14 @@ export function startJellyfishEmote(
   emoteId: AssistantEventEmoteId,
   elapsed: number
 ): boolean {
+  const eventElapsed = getJellyfishEventElapsed(state, elapsed)
   state.activeEmote = {
     duration: emoteId === 'happy-bounce' ? 1.45 : 1.8,
     id: emoteId,
-    startAt: elapsed
+    startAt: eventElapsed
   }
-  state.swimBurstStartAt = elapsed
-  state.nextSwimBurstAt = Math.max(state.nextSwimBurstAt, elapsed + 2.2)
+  state.swimBurstStartAt = eventElapsed
+  state.nextSwimBurstAt = Math.max(state.nextSwimBurstAt, eventElapsed + 2.2)
 
   return true
 }
@@ -437,25 +471,31 @@ export function setJellyfishDragging(
     return
   }
 
+  const eventElapsed = getJellyfishEventElapsed(state, elapsed)
   state.isDragging = dragging
 
   if (dragging) {
     state.dragReleaseStartAt = Number.NEGATIVE_INFINITY
-    state.swimBurstStartAt = elapsed
-    state.nextSwimBurstAt = Math.max(state.nextSwimBurstAt, elapsed + 1.6)
+    state.swimBurstStartAt = eventElapsed
+    state.nextSwimBurstAt = Math.max(state.nextSwimBurstAt, eventElapsed + 1.6)
     return
   }
 
-  state.dragReleaseStartAt = elapsed
+  state.dragReleaseStartAt = eventElapsed
 }
 
 export function startJellyfishDoubleClickBurst(
   state: JellyfishMotionState,
   elapsed: number
 ): void {
-  state.doubleClickStartAt = elapsed
-  state.swimBurstStartAt = elapsed
-  state.nextSwimBurstAt = Math.max(state.nextSwimBurstAt, elapsed + 2.2)
+  const eventElapsed = getJellyfishEventElapsed(state, elapsed)
+  state.doubleClickStartAt = eventElapsed
+  state.swimBurstStartAt = eventElapsed
+  state.nextSwimBurstAt = Math.max(state.nextSwimBurstAt, eventElapsed + 2.2)
+}
+
+function getJellyfishEventElapsed(state: JellyfishMotionState, fallbackElapsed: number): number {
+  return Number.isFinite(state.animationElapsed) ? state.animationElapsed : fallbackElapsed
 }
 
 export function evaluateJellyfishFrame(input: {
@@ -546,7 +586,7 @@ export function evaluateJellyfishFrame(input: {
       1 + swim * 0.024 + swimBurst * 0.045,
       1 + swim * 0.018 + swimBurst * 0.035
     ),
-    bellPivotScale: new THREE.Vector3(1 / pulse, pulse, 1 / pulse),
+    bellPivotScale: new THREE.Vector3(pulse, 1 / pulse, pulse),
     coreGlowScale: new THREE.Vector3(
       0.72 + swim * 0.025 + happyBounce * 0.06 + doubleClickBurst * 0.1,
       0.42 + swim * 0.018 + swimBurst * 0.05 + doubleClickBurst * 0.07,
@@ -561,9 +601,9 @@ export function evaluateJellyfishFrame(input: {
       dragRelease * 0.28 +
       doubleClickBurst * 1.35,
     oralGlowScale: new THREE.Vector3(
-      0.55 + swim * 0.025 + happyBounce * 0.06 + doubleClickBurst * 0.1,
-      0.82 + swimBurst * 0.08 + doubleClickBurst * 0.08,
-      0.42 + swim * 0.02 + happyBounce * 0.05
+      0.46 + swim * 0.02 + happyBounce * 0.04 + doubleClickBurst * 0.08,
+      0.68 + swimBurst * 0.06 + doubleClickBurst * 0.06,
+      0.36 + swim * 0.018 + happyBounce * 0.04
     ),
     rootPosition: new THREE.Vector3(
       driftX,
@@ -595,29 +635,30 @@ export function evaluateJellyfishFrame(input: {
 }
 
 function createBellGeometry(): THREE.BufferGeometry {
-  const radialSegments = 88
-  const verticalSegments = 24
+  const radialSegments = 64
+  const verticalSegments = 16
   const positions: number[] = []
   const colors: number[] = []
   const indices: number[] = []
-  const topColor = new THREE.Color(0xc9f3ff)
-  const rimColor = new THREE.Color(0xb6cfff)
-  const glowColor = new THREE.Color(0xf0fbff)
+  const topColor = new THREE.Color(0xb7e5ff)
+  const rimColor = new THREE.Color(0x7bbcff)
+  const glowColor = new THREE.Color(0xd8f2ff)
 
   for (let yIndex = 0; yIndex <= verticalSegments; yIndex += 1) {
     const v = yIndex / verticalSegments
-    const eased = 1 - Math.pow(1 - v, 1.86)
-    const baseRadius = 0.13 + Math.pow(Math.sin(v * Math.PI * 0.52), 0.95) * 0.45
-    const shoulder = Math.sin(v * Math.PI) * 0.095
+    const eased = 1 - Math.pow(1 - v, 1.78)
+    const crownRoundness = Math.sin(v * Math.PI) * 0.018
+    const baseRadius = 0.018 + Math.pow(Math.sin(v * Math.PI * 0.52), 0.88) * 0.53 + crownRoundness
+    const shoulder = Math.sin(v * Math.PI) * 0.105
     const rimInfluence = Math.pow(v, 4.2)
-    const y = 0.47 - eased * 0.55 + shoulder - rimInfluence * 0.048
+    const y = 0.49 - eased * 0.56 + shoulder - rimInfluence * 0.052
 
     for (let radialIndex = 0; radialIndex <= radialSegments; radialIndex += 1) {
       const u = radialIndex / radialSegments
       const angle = u * Math.PI * 2
-      const scallop = Math.sin(angle * 9) * 0.024 * rimInfluence
-      const asymmetry = Math.sin(angle * 3.1 + 0.35) * 0.014 * Math.pow(v, 1.7)
-      const softIrregularity = Math.sin(angle * 5 + v * 2.2) * 0.01 * Math.pow(v, 2.2)
+      const scallop = Math.sin(angle * 10) * 0.022 * rimInfluence
+      const asymmetry = Math.sin(angle * 3.1 + 0.35) * 0.017 * Math.pow(v, 1.7)
+      const softIrregularity = Math.sin(angle * 5 + v * 2.2) * 0.012 * Math.pow(v, 2.2)
       const radius = baseRadius + scallop + asymmetry + softIrregularity
       const vertexY =
         y +
@@ -656,14 +697,14 @@ function createBellGeometry(): THREE.BufferGeometry {
 }
 
 function createScallopedRimGeometry(): THREE.BufferGeometry {
-  const radialSegments = 96
+  const radialSegments = 64
   const positions: number[] = []
   const colors: number[] = []
   const indices: number[] = []
   const innerRadius = 0.36
   const outerRadius = 0.5
-  const rimColor = new THREE.Color(0xc6f4ff)
-  const foldColor = new THREE.Color(0x7cc9ef)
+  const rimColor = new THREE.Color(0xa8e2ff)
+  const foldColor = new THREE.Color(0x4f9ed8)
 
   for (let index = 0; index <= radialSegments; index += 1) {
     const t = index / radialSegments
@@ -721,7 +762,7 @@ function createBellDetails(): { root: THREE.Group } {
 
   const spokeMaterial = new THREE.LineBasicMaterial({
     blending: THREE.AdditiveBlending,
-    color: 0xd9fbff,
+    color: 0xbceeff,
     depthTest: true,
     depthWrite: false,
     opacity: 0.085,
@@ -758,6 +799,10 @@ function createBellDetails(): { root: THREE.Group } {
   return { root }
 }
 
+function createTentacleCenters(segmentCount: number): THREE.Vector3[] {
+  return Array.from({ length: segmentCount + 1 }, () => new THREE.Vector3())
+}
+
 function createRibbonIndices(segmentCount: number): number[] {
   const indices: number[] = []
 
@@ -789,7 +834,7 @@ function hitTestJellyfish(root: THREE.Object3D, raycaster: THREE.Raycaster): boo
       localRay,
       new THREE.Vector3(0, 0.05, 0),
       new THREE.Vector3(-0.06, -1.15, 0),
-      0.32
+      0.26
     )
   )
 }
@@ -848,11 +893,19 @@ function updateTentacle(
   waveSway: number,
   cameraLocalPosition: THREE.Vector3
 ): void {
+  const lagSeconds =
+    tentacle.style === 'oralArm' ? 0.12 : tentacle.style === 'ribbon' ? 0.22 : 0.32
+  const laggedElapsed = elapsed - lagSeconds * (0.7 + energy * 0.08)
+  const laggedPulse =
+    1 +
+    (pulse - 1) *
+      (tentacle.style === 'oralArm' ? 0.78 : tentacle.style === 'ribbon' ? 0.56 : 0.38)
+
   if (tentacle.style === 'ribbon' || tentacle.style === 'oralArm') {
     updateRibbonTentacle(
       tentacle,
-      elapsed,
-      pulse,
+      laggedElapsed,
+      laggedPulse,
       energy,
       waveSway,
       cameraLocalPosition
@@ -860,7 +913,7 @@ function updateTentacle(
     return
   }
 
-  updateFilamentTentacle(tentacle, elapsed, pulse, energy, waveSway)
+  updateFilamentTentacle(tentacle, laggedElapsed, laggedPulse, energy, waveSway)
 }
 
 function updateRibbonTentacle(
@@ -871,38 +924,39 @@ function updateRibbonTentacle(
   waveSway: number,
   cameraLocalPosition: THREE.Vector3
 ): void {
-  const { segmentCount, positions, width } = tentacle
-  const centers: THREE.Vector3[] = []
+  const { centers, segmentCount, positions, tipWidth, width } = tentacle
 
   for (let segment = 0; segment <= segmentCount; segment += 1) {
-    centers.push(computeTentacleCenter(tentacle, segment, elapsed, pulse, energy, waveSway))
+    computeTentacleCenter(tentacle, segment, elapsed, pulse, energy, waveSway, centers[segment])
   }
 
   for (let segment = 0; segment <= segmentCount; segment += 1) {
     const t = segment / segmentCount
     const previous = centers[Math.max(0, segment - 1)]
     const next = centers[Math.min(segmentCount, segment + 1)]
-    const tangent = next.clone().sub(previous).normalize()
-    const viewDirection = cameraLocalPosition.clone().sub(centers[segment]).normalize()
-    const side = new THREE.Vector3().crossVectors(viewDirection, tangent)
+    ribbonTangentScratch.subVectors(next, previous).normalize()
+    ribbonViewScratch.subVectors(cameraLocalPosition, centers[segment]).normalize()
+    ribbonSideScratch.crossVectors(ribbonViewScratch, ribbonTangentScratch)
 
-    if (side.lengthSq() < 0.0001) {
-      side.set(1, 0, 0)
+    if (ribbonSideScratch.lengthSq() < 0.0001) {
+      ribbonSideScratch.set(1, 0, 0)
     } else {
-      side.normalize()
+      ribbonSideScratch.normalize()
     }
 
-    const flutter = 1 + Math.sin(elapsed * 1.9 + tentacle.phase + t * 14) * 0.08
-    const halfWidth = width * Math.pow(1 - t, 1.35) * flutter
+    const flutter = 1 + Math.sin(elapsed * 0.82 + tentacle.phase + t * 6.5) * 0.035
+    const taperProgress =
+      tentacle.style === 'oralArm' ? Math.pow(t, 0.9) : Math.pow(t, 1.25)
+    const halfWidth = THREE.MathUtils.lerp(width, tipWidth, taperProgress) * flutter
     const center = centers[segment]
     const index = segment * 6
 
-    positions[index] = center.x - side.x * halfWidth
-    positions[index + 1] = center.y - side.y * halfWidth
-    positions[index + 2] = center.z - side.z * halfWidth
-    positions[index + 3] = center.x + side.x * halfWidth
-    positions[index + 4] = center.y + side.y * halfWidth
-    positions[index + 5] = center.z + side.z * halfWidth
+    positions[index] = center.x - ribbonSideScratch.x * halfWidth
+    positions[index + 1] = center.y - ribbonSideScratch.y * halfWidth
+    positions[index + 2] = center.z - ribbonSideScratch.z * halfWidth
+    positions[index + 3] = center.x + ribbonSideScratch.x * halfWidth
+    positions[index + 4] = center.y + ribbonSideScratch.y * halfWidth
+    positions[index + 5] = center.z + ribbonSideScratch.z * halfWidth
   }
 
   tentacle.geometry.attributes.position.needsUpdate = true
@@ -918,17 +972,14 @@ function updateFilamentTentacle(
   const { positions, segmentCount } = tentacle
 
   for (let segment = 0; segment <= segmentCount; segment += 1) {
-    const center = computeTentacleCenter(tentacle, segment, elapsed, pulse, energy, waveSway)
+    computeTentacleCenter(tentacle, segment, elapsed, pulse, energy, waveSway, filamentCenterScratch)
     const index = segment * 3
 
-    positions[index] = center.x
-    positions[index + 1] = center.y
-    positions[index + 2] = center.z
+    positions[index] = filamentCenterScratch.x
+    positions[index + 1] = filamentCenterScratch.y
+    positions[index + 2] = filamentCenterScratch.z
   }
 
-  const base = computeTentacleCenter(tentacle, 0, elapsed, pulse, energy, waveSway)
-  positions[0] = base.x
-  positions[2] = base.z
   tentacle.geometry.attributes.position.needsUpdate = true
 }
 
@@ -938,49 +989,62 @@ function computeTentacleCenter(
   elapsed: number,
   pulse: number,
   energy: number,
-  waveSway: number
+  waveSway: number,
+  target: THREE.Vector3
 ): THREE.Vector3 {
   const { angle, baseRadius, length, phase, segmentCount, waveScale } = tentacle
   const t = segment / segmentCount
   const falloff = t * t
+  const segmentLag =
+    t * (tentacle.style === 'oralArm' ? 0.08 : tentacle.style === 'ribbon' ? 0.16 : 0.22)
+  const localElapsed = elapsed - segmentLag
   const wave =
-    Math.sin(elapsed * (1.18 + energy * 0.08) + phase + t * 4.45) *
-    0.058 *
+    Math.sin(localElapsed * (0.72 + energy * 0.035) + phase + t * 3.1) *
+    0.042 *
     energy *
     waveScale *
     falloff
   const crossWave =
-    (Math.cos(elapsed * 0.88 + phase * 1.3 + t * 4.1) * 0.038 +
-      waveSway * 0.048) *
+    (Math.cos(localElapsed * 0.52 + phase * 1.3 + t * 3.5) * 0.03 +
+      waveSway * 0.035) *
     energy *
     waveScale *
     falloff
-  const taperRadius = baseRadius * (1 - t * (tentacle.style === 'oralArm' ? 0.42 : 0.58))
+  const taperRadius = baseRadius * (1 - t * (tentacle.style === 'oralArm' ? 0.32 : 0.58))
+  const outwardArc =
+    tentacle.style === 'oralArm'
+      ? Math.sin(phase * 1.7) * 0.04 * Math.sin(t * Math.PI)
+      : tentacle.style === 'ribbon'
+        ? Math.sin(phase * 0.9) * 0.075 * Math.sin(t * Math.PI * 0.82)
+        : Math.sin(phase * 0.8) * 0.11 * Math.sin(t * Math.PI * 0.72)
   const currentAmount =
     tentacle.style === 'oralArm'
-      ? Math.sin(t * Math.PI * 1.35 + phase) * 0.052 * t
+      ? Math.sin(t * Math.PI * 1.55 + phase) * 0.082 * Math.sin(t * Math.PI)
       : tentacle.style === 'ribbon'
-        ? Math.sin(t * Math.PI * 1.15 + phase * 0.7) * 0.06 * Math.pow(t, 1.35)
-        : Math.sin(t * Math.PI * 1.05 + phase * 0.5) * 0.095 * Math.pow(t, 1.45)
+        ? Math.sin(t * Math.PI * 1.18 + phase * 0.7) * 0.064 * Math.pow(t, 1.2)
+        : Math.sin(t * Math.PI * 1.02 + phase * 0.5) * 0.085 * Math.pow(t, 1.4)
   const curl =
     tentacle.style === 'oralArm'
-      ? Math.sin(t * Math.PI * 2.4 + phase) * 0.085 * Math.sin(t * Math.PI)
+      ? Math.sin(t * Math.PI * 2.7 + phase) * 0.12 * Math.sin(t * Math.PI)
       : 0
   const startY =
     tentacle.style === 'oralArm'
-      ? -0.045 + Math.sin(phase) * 0.022
+      ? -0.055 + Math.sin(phase) * 0.026
       : tentacle.style === 'ribbon'
-        ? 0.01 + Math.sin(phase * 0.7) * 0.026
-        : -0.005 + Math.sin(phase * 0.9) * 0.032
+        ? 0.0 + Math.sin(phase * 0.7) * 0.035
+        : -0.012 + Math.sin(phase * 0.9) * 0.04
   const oralFold =
     tentacle.style === 'oralArm'
-      ? Math.sin(t * Math.PI * 1.7 + phase * 0.6) * 0.035 * t
+      ? Math.sin(t * Math.PI * 1.85 + phase * 0.6) * 0.052 * t
       : 0
   const sideMotion = wave + curl + currentAmount
+  const radialRadius = taperRadius + outwardArc
 
-  return new THREE.Vector3(
-    Math.cos(angle) * taperRadius + Math.cos(angle + Math.PI / 2) * sideMotion,
-    startY - length * t + Math.sin(elapsed * 1.28 + phase) * 0.024 * t + oralFold,
-    Math.sin(angle) * taperRadius + Math.sin(angle + Math.PI / 2) * sideMotion + crossWave
-  ).multiply(new THREE.Vector3(1.02 - (pulse - 1) * 0.65, 1, 1.02 - (pulse - 1) * 0.65))
+  const horizontalScale = 1.02 - (pulse - 1) * 0.65
+
+  return target.set(
+    (Math.cos(angle) * radialRadius + Math.cos(angle + Math.PI / 2) * sideMotion) * horizontalScale,
+    startY - length * t + Math.sin(localElapsed * 1.1 + phase) * 0.025 * t + oralFold,
+    (Math.sin(angle) * radialRadius + Math.sin(angle + Math.PI / 2) * sideMotion + crossWave) * horizontalScale
+  )
 }
