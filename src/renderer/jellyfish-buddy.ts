@@ -95,8 +95,8 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
     emissive: 0x2d8dff,
     emissiveIntensity: 0.18,
     metalness: 0,
-    opacity: 0.42,
-    roughness: 0.32,
+    opacity: 0.4,
+    roughness: 0.34,
     side: THREE.DoubleSide,
     transparent: true,
     vertexColors: true
@@ -137,7 +137,7 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
       blending: THREE.AdditiveBlending,
       color: 0x86ccff,
       depthWrite: false,
-      opacity: 0.12,
+      opacity: 0.095,
       transparent: true,
       vertexColors: true
     })
@@ -153,7 +153,7 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
       blending: THREE.AdditiveBlending,
       color: 0x9edcff,
       depthWrite: false,
-      opacity: 0.04,
+      opacity: 0.028,
       transparent: true
     })
   )
@@ -198,7 +198,7 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
     color: 0xb7e9ff,
     depthTest: true,
     depthWrite: false,
-    opacity: 0.2,
+    opacity: 0.18,
     side: THREE.DoubleSide,
     transparent: true
   })
@@ -276,14 +276,14 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
       baseRadius: 0.035 + (index % 3) * 0.035,
       centers,
       geometry,
-      length: index % 5 === 0 ? 0.86 : 0.56 + (index % 4) * 0.1,
+      length: index % 5 === 0 ? 0.82 : 0.52 + (index % 4) * 0.11,
       phase: index * 1.12 + 0.7,
       positions,
       segmentCount,
       style: 'oralArm',
       tipWidth: 0.018 + (index % 3) * 0.006,
       waveScale: 1.08 + (index % 3) * 0.13,
-      width: 0.062 + (index % 3) * 0.02
+      width: 0.07 + (index % 3) * 0.022
     })
   }
 
@@ -648,17 +648,17 @@ function createBellGeometry(): THREE.BufferGeometry {
     const v = yIndex / verticalSegments
     const eased = 1 - Math.pow(1 - v, 1.78)
     const crownRoundness = Math.sin(v * Math.PI) * 0.018
-    const baseRadius = 0.018 + Math.pow(Math.sin(v * Math.PI * 0.52), 0.88) * 0.53 + crownRoundness
-    const shoulder = Math.sin(v * Math.PI) * 0.105
+    const baseRadius = 0.055 + Math.pow(Math.sin(v * Math.PI * 0.52), 1.04) * 0.5 + crownRoundness
+    const shoulder = Math.sin(v * Math.PI) * 0.125
     const rimInfluence = Math.pow(v, 4.2)
-    const y = 0.49 - eased * 0.56 + shoulder - rimInfluence * 0.052
+    const y = 0.47 - eased * 0.52 + shoulder - rimInfluence * 0.065
 
     for (let radialIndex = 0; radialIndex <= radialSegments; radialIndex += 1) {
       const u = radialIndex / radialSegments
       const angle = u * Math.PI * 2
-      const scallop = Math.sin(angle * 10) * 0.022 * rimInfluence
-      const asymmetry = Math.sin(angle * 3.1 + 0.35) * 0.017 * Math.pow(v, 1.7)
-      const softIrregularity = Math.sin(angle * 5 + v * 2.2) * 0.012 * Math.pow(v, 2.2)
+      const scallop = Math.sin(angle * 10) * 0.024 * rimInfluence
+      const asymmetry = Math.sin(angle * 3.1 + 0.35) * 0.021 * Math.pow(v, 1.7)
+      const softIrregularity = Math.sin(angle * 5 + v * 2.2) * 0.014 * Math.pow(v, 2.2)
       const radius = baseRadius + scallop + asymmetry + softIrregularity
       const vertexY =
         y +
@@ -714,7 +714,7 @@ function createScallopedRimGeometry(): THREE.BufferGeometry {
 
     for (const edge of [0, 1]) {
       const radius = (edge === 0 ? innerRadius : outerRadius) + scallop * edge
-      const droop = edge === 0 ? 0.012 : 0.055 + Math.sin(angle * 5.5) * 0.012
+      const droop = edge === 0 ? 0.018 : 0.074 + Math.sin(angle * 5.5) * 0.018
       positions.push(Math.cos(angle) * radius * 1.08, y - droop, Math.sin(angle) * radius)
       const color = rimColor.clone().lerp(foldColor, edge * 0.45)
       colors.push(color.r, color.g, color.b)
@@ -1013,19 +1013,19 @@ function computeTentacleCenter(
   const taperRadius = baseRadius * (1 - t * (tentacle.style === 'oralArm' ? 0.32 : 0.58))
   const outwardArc =
     tentacle.style === 'oralArm'
-      ? Math.sin(phase * 1.7) * 0.04 * Math.sin(t * Math.PI)
+      ? Math.sin(phase * 1.7) * 0.062 * Math.sin(t * Math.PI)
       : tentacle.style === 'ribbon'
         ? Math.sin(phase * 0.9) * 0.075 * Math.sin(t * Math.PI * 0.82)
         : Math.sin(phase * 0.8) * 0.11 * Math.sin(t * Math.PI * 0.72)
   const currentAmount =
     tentacle.style === 'oralArm'
-      ? Math.sin(t * Math.PI * 1.55 + phase) * 0.082 * Math.sin(t * Math.PI)
+      ? Math.sin(t * Math.PI * 1.72 + phase) * 0.118 * Math.sin(t * Math.PI)
       : tentacle.style === 'ribbon'
         ? Math.sin(t * Math.PI * 1.18 + phase * 0.7) * 0.064 * Math.pow(t, 1.2)
         : Math.sin(t * Math.PI * 1.02 + phase * 0.5) * 0.085 * Math.pow(t, 1.4)
   const curl =
     tentacle.style === 'oralArm'
-      ? Math.sin(t * Math.PI * 2.7 + phase) * 0.12 * Math.sin(t * Math.PI)
+      ? Math.sin(t * Math.PI * 3.05 + phase) * 0.16 * Math.sin(t * Math.PI)
       : 0
   const startY =
     tentacle.style === 'oralArm'
@@ -1035,7 +1035,7 @@ function computeTentacleCenter(
         : -0.012 + Math.sin(phase * 0.9) * 0.04
   const oralFold =
     tentacle.style === 'oralArm'
-      ? Math.sin(t * Math.PI * 1.85 + phase * 0.6) * 0.052 * t
+      ? Math.sin(t * Math.PI * 2.05 + phase * 0.6) * 0.074 * t
       : 0
   const sideMotion = wave + curl + currentAmount
   const radialRadius = taperRadius + outwardArc
