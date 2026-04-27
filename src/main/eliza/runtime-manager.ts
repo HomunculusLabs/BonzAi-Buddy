@@ -202,12 +202,9 @@ export class BonziRuntimeManager {
   async installPlugin(
     request: ElizaPluginInstallRequest
   ): Promise<ElizaPluginOperationResult> {
-    const effectiveRequest = this.getRuntimeApprovalSettings().approvalsEnabled
-      ? request
-      : { ...request, confirmed: true }
     const result = await this.pluginInstallationService.install(
       this.getProviderInfo(),
-      effectiveRequest
+      request
     )
 
     if (result.ok) {

@@ -1,5 +1,5 @@
 import { once } from 'node:events'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import {
   createServer,
   type IncomingHttpHeaders,
@@ -708,6 +708,100 @@ test('discovers plugins from registry endpoint via preload bridge', async () => 
   } finally {
     await app.close()
     await registry.close()
+    await rm(userDataDir, { recursive: true, force: true })
+  }
+})
+
+test('confirms plugin install preview when approvals are disabled', async () => {
+  const userDataDir = await mkdtemp(join(tmpdir(), 'bonzi-e2e-plugin-install-'))
+  const workspaceDir = join(userDataDir, 'plugin-workspace')
+  const fakeBunPath = join(userDataDir, 'fake-bun')
+  const fakeBunLogPath = join(userDataDir, 'fake-bun.log')
+
+  await writeFile(
+    join(userDataDir, 'bonzi-settings.json'),
+    JSON.stringify(
+      {
+        schemaVersion: 2,
+        plugins: {},
+        approvalsEnabled: false
+      },
+      null,
+      2
+    )
+  )
+  await writeFile(
+    fakeBunPath,
+    '#!/bin/sh\nprintf "%s\\n" "$*" >> "$BONZI_FAKE_BUN_LOG"\nexit 0\n'
+  )
+  await chmod(fakeBunPath, 0o755)
+
+  const env = {
+    ...process.env,
+    BONZI_E2E_MODE: '1',
+    BONZI_ASSISTANT_PROVIDER: 'eliza-classic',
+    BONZI_DISABLE_GPU: '1',
+    BONZI_OPAQUE_WINDOW: '1',
+    BONZI_DISABLE_VRM: '1',
+    BONZI_USER_DATA_DIR: userDataDir,
+    BONZI_PLUGIN_WORKSPACE_DIR: workspaceDir,
+    BONZI_BUN_PATH: fakeBunPath,
+    BONZI_FAKE_BUN_LOG: fakeBunLogPath
+  }
+  delete env.ELECTRON_RENDERER_URL
+
+  const app = await electron.launch({
+    args: [join(process.cwd(), 'out/main/index.js')],
+    env
+  })
+
+  try {
+    const window = await app.firstWindow()
+    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+
+    const preview = await window.evaluate(async () => {
+      return window.bonzi.plugins.install({
+        id: '@bealers/plugin-mattermost',
+        pluginId: '@bealers/plugin-mattermost',
+        packageName: '@bealers/plugin-mattermost',
+        versionRange: '0.5.1',
+        confirmed: false
+      })
+    })
+
+    expect(preview.ok).toBe(false)
+    expect(preview.confirmationRequired).toBe(true)
+    expect(preview.message).toContain('Installing third-party plugins requires confirmation')
+
+    const installResult = await window.evaluate(async (operationId) => {
+      return window.bonzi.plugins.install({
+        id: '@bealers/plugin-mattermost',
+        pluginId: '@bealers/plugin-mattermost',
+        packageName: '@bealers/plugin-mattermost',
+        versionRange: '0.5.1',
+        confirmed: true,
+        confirmationOperationId: operationId
+      })
+    }, preview.operation.operationId)
+
+    expect(installResult.ok).toBe(true)
+    expect(installResult.confirmationRequired).toBe(false)
+    expect(installResult.message).toContain('Installed @bealers/plugin-mattermost')
+
+    const fakeBunLog = await readFile(fakeBunLogPath, 'utf8')
+    expect(fakeBunLog).toContain('add @bealers/plugin-mattermost@0.5.1 --ignore-scripts')
+
+    const persisted = JSON.parse(
+      await readFile(join(userDataDir, 'bonzi-settings.json'), 'utf8')
+    ) as {
+      plugins?: Record<string, { installed?: boolean; packageName?: string }>
+    }
+    expect(persisted.plugins?.['@bealers/plugin-mattermost']?.installed).toBe(true)
+    expect(persisted.plugins?.['@bealers/plugin-mattermost']?.packageName).toBe(
+      '@bealers/plugin-mattermost'
+    )
+  } finally {
+    await app.close()
     await rm(userDataDir, { recursive: true, force: true })
   }
 })
