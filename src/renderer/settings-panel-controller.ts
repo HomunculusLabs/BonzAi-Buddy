@@ -153,7 +153,7 @@ export function createSettingsPanelController(
   const handleSettingsTabClick = (event: MouseEvent): void => {
     const target = event.target
 
-    if (!(target instanceof HTMLElement)) {
+    if (!(target instanceof Element)) {
       return
     }
 
