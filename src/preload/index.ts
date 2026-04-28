@@ -25,6 +25,10 @@ function send<Channel extends IpcSendChannel>(
   ipcRenderer.send(channel, ...args)
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
 function onRendererEvent<Channel extends IpcRendererEventChannel>(
   channel: Channel,
   listener: (...args: IpcRendererEventArgs<Channel>) => void
@@ -79,7 +83,13 @@ const bonziApi = {
     getBounds: () => invoke(IPC_CHANNELS.window.getBounds),
     minimize: () => send(IPC_CHANNELS.window.minimize),
     close: () => send(IPC_CHANNELS.window.close),
-    setPosition: (x, y) => send(IPC_CHANNELS.window.setPosition, x, y),
+    setPosition: (x, y) => {
+      if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
+        return
+      }
+
+      send(IPC_CHANNELS.window.setPosition, x, y)
+    },
     setBounds: (bounds) => send(IPC_CHANNELS.window.setBounds, bounds),
     setMouseEventsIgnored: (ignored) =>
       send(IPC_CHANNELS.window.setMouseEventsIgnored, ignored)

@@ -14,6 +14,10 @@ export interface WindowDragController {
   dispose(): void
 }
 
+function areFiniteWindowCoordinates(...values: number[]): boolean {
+  return values.every(Number.isFinite)
+}
+
 export function createWindowDragController(options: {
   canStartDrag?: (event: PointerEvent) => boolean
   onDragStateChange?: (dragging: boolean) => void
@@ -44,7 +48,7 @@ export function createWindowDragController(options: {
 
     const bounds = await window.bonzi.window.getBounds()
 
-    if (!bounds) {
+    if (!bounds || !areFiniteWindowCoordinates(bounds.x, bounds.y)) {
       return
     }
 
@@ -71,11 +75,14 @@ export function createWindowDragController(options: {
 
     const deltaX = event.screenX - dragState.startScreen.x
     const deltaY = event.screenY - dragState.startScreen.y
+    const nextX = dragState.startBounds.x + deltaX
+    const nextY = dragState.startBounds.y + deltaY
 
-    window.bonzi.window.setPosition(
-      dragState.startBounds.x + deltaX,
-      dragState.startBounds.y + deltaY
-    )
+    if (!areFiniteWindowCoordinates(nextX, nextY)) {
+      return
+    }
+
+    window.bonzi.window.setPosition(nextX, nextY)
   }
 
   const clearDragState = (event: PointerEvent): void => {

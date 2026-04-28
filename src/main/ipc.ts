@@ -89,12 +89,18 @@ function onSend<Channel extends IpcSendChannel>(
   )
 }
 
-function areFiniteBounds(bounds: WindowBounds): boolean {
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function areFiniteBounds(bounds: unknown): bounds is WindowBounds {
   return (
-    Number.isFinite(bounds.x) &&
-    Number.isFinite(bounds.y) &&
-    Number.isFinite(bounds.width) &&
-    Number.isFinite(bounds.height)
+    typeof bounds === 'object' &&
+    bounds !== null &&
+    isFiniteNumber((bounds as WindowBounds).x) &&
+    isFiniteNumber((bounds as WindowBounds).y) &&
+    isFiniteNumber((bounds as WindowBounds).width) &&
+    isFiniteNumber((bounds as WindowBounds).height)
   )
 }
 
@@ -187,10 +193,13 @@ export function registerIpcHandlers(
   })
 
   onSend(IPC_CHANNELS.window.setPosition, (event, x, y) => {
-    BrowserWindow.fromWebContents(event.sender)?.setPosition(
-      Math.round(x),
-      Math.round(y)
-    )
+    const targetWindow = BrowserWindow.fromWebContents(event.sender)
+
+    if (!targetWindow || !isFiniteNumber(x) || !isFiniteNumber(y)) {
+      return
+    }
+
+    targetWindow.setPosition(Math.round(x), Math.round(y))
   })
 
   onSend(IPC_CHANNELS.window.setMouseEventsIgnored, (event, ignored) => {
