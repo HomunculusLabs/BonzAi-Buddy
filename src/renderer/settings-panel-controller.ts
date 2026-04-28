@@ -12,6 +12,7 @@ import { createApprovalSettingsController } from './approval-settings-controller
 import { createCharacterSettingsController } from './character-settings-controller'
 import { createKnowledgeSettingsController } from './knowledge-settings-controller'
 import { createSettingsStatusController } from './settings-status-controller'
+import { createWorkspaceSettingsController } from './workspace-settings-controller'
 
 export interface SettingsPanelController {
   setVisible(visible: boolean): void
@@ -36,6 +37,7 @@ export interface SettingsPanelControllerOptions {
     | 'settingsPanelEl'
     | 'characterSettingsEl'
     | 'knowledgeSettingsEl'
+    | 'workspaceSettingsEl'
     | 'approvalSettingsEl'
     | 'pluginSettingsEl'
     | 'settingsStatusEl'
@@ -74,6 +76,7 @@ export function createSettingsPanelController(
     settingsPanelEl,
     characterSettingsEl,
     knowledgeSettingsEl,
+    workspaceSettingsEl,
     approvalSettingsEl,
     pluginSettingsEl,
     settingsStatusEl,
@@ -117,6 +120,13 @@ export function createSettingsPanelController(
     knowledgeSettingsEl,
     setStatusMessage: statusController.setStatusMessage,
     onSavingChange: statusController.setKnowledgeSaving
+  })
+
+  const workspaceController = createWorkspaceSettingsController({
+    workspaceSettingsEl,
+    setStatusMessage: statusController.setStatusMessage,
+    onApplyShellState: options.onApplyShellState,
+    onSavingChange: statusController.setWorkspaceSaving
   })
 
   const pluginController = createPluginSettingsController({
@@ -236,6 +246,7 @@ export function createSettingsPanelController(
       focusActiveTabSoon()
       void approvalController.hydrateApprovalSettings()
       void characterController.hydrate()
+      void workspaceController.hydrate()
       void knowledgeController.hydrate()
       void pluginController.hydrate()
     }
@@ -305,6 +316,7 @@ export function createSettingsPanelController(
         handleApplyRuntimeChangesClick
       )
       pluginController.dispose()
+      workspaceController.dispose()
       knowledgeController.dispose()
       characterController.dispose()
       approvalController.dispose()

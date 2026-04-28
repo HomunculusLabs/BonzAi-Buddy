@@ -9,6 +9,8 @@ import {
   normalizeScrollAmount,
   normalizeScrollDirection,
   normalizeText,
+  normalizeWorkspaceFileContent,
+  normalizeWorkspaceFilePath,
   truncate
 } from '../assistant-action-param-utils'
 
@@ -236,6 +238,72 @@ const BONZI_DESKTOP_ACTION_SPECS = [
       }
     ],
     missingParameterMessage: 'I need the draft text before I can prepare a Discord type-draft action.'
+  },
+  {
+    elizaName: 'WORKSPACE_LIST_FILES',
+    type: 'workspace-list-files',
+    title: 'List workspace files',
+    description:
+      "Ask Bonzi to list files in Bonzi's dedicated writable workspace folder. Bonzi cannot list arbitrary folders.",
+    requiresConfirmation: false,
+    similes: ['LIST_WORKSPACE_FILES', 'SHOW_WORKSPACE', 'WORKSPACE_FILES', 'workspace-list-files'],
+    parameters: [
+      {
+        name: 'filePath',
+        description:
+          'Optional relative workspace directory path to list. Use an empty value for the workspace root.',
+        required: false,
+        schema: { type: 'string' },
+        examples: ['', 'notes']
+      }
+    ]
+  },
+  {
+    elizaName: 'WORKSPACE_READ_FILE',
+    type: 'workspace-read-file',
+    title: 'Read workspace file',
+    description:
+      "Ask Bonzi to read a UTF-8 text file from Bonzi's dedicated writable workspace folder. Paths must be relative and stay inside the workspace.",
+    requiresConfirmation: false,
+    similes: ['READ_WORKSPACE_FILE', 'OPEN_WORKSPACE_FILE', 'workspace-read-file'],
+    parameters: [
+      {
+        name: 'filePath',
+        description:
+          "Relative path to a text file inside Bonzi's workspace folder, such as notes/todo.md.",
+        required: true,
+        schema: { type: 'string' },
+        examples: ['notes/todo.md']
+      }
+    ],
+    missingParameterMessage: 'I need a relative workspace file path before I can prepare a read action.'
+  },
+  {
+    elizaName: 'WORKSPACE_WRITE_FILE',
+    type: 'workspace-write-file',
+    title: 'Write workspace file',
+    description:
+      "Ask Bonzi to write a UTF-8 text file inside Bonzi's dedicated writable workspace folder. Paths must be relative and stay inside the workspace.",
+    requiresConfirmation: true,
+    similes: ['WRITE_WORKSPACE_FILE', 'SAVE_WORKSPACE_FILE', 'CREATE_WORKSPACE_FILE', 'workspace-write-file'],
+    parameters: [
+      {
+        name: 'filePath',
+        description:
+          "Relative destination path inside Bonzi's workspace folder, such as notes/todo.md. Do not use absolute paths or .. segments.",
+        required: true,
+        schema: { type: 'string' },
+        examples: ['notes/todo.md']
+      },
+      {
+        name: 'content',
+        description: 'UTF-8 text content to write. This action is limited to small text files.',
+        required: true,
+        schema: { type: 'string' },
+        examples: ['# Notes\n- Remember this.']
+      }
+    ],
+    missingParameterMessage: 'I need both a relative workspace file path and file content before I can prepare a write action.'
   }
 ] as const satisfies readonly BonziDesktopActionSpec[]
 
@@ -428,6 +496,32 @@ function createActionParams(
 
       return hasAssistantActionParams(params) ? params : undefined
     }
+    case 'workspace-list-files': {
+      const filePath = normalizeWorkspaceFilePath(parameters.filePath)
+      return filePath ? { filePath: truncate(filePath, 500) } : undefined
+    }
+    case 'workspace-read-file': {
+      const filePath = normalizeWorkspaceFilePath(parameters.filePath)
+      return filePath ? { filePath: truncate(filePath, 500) } : undefined
+    }
+    case 'workspace-write-file': {
+      const filePath = normalizeWorkspaceFilePath(parameters.filePath)
+      const content =
+        typeof parameters.content === 'string'
+          ? normalizeWorkspaceFileContent(parameters.content)
+          : undefined
+      const params: AssistantActionParams = {}
+
+      if (filePath) {
+        params.filePath = truncate(filePath, 500)
+      }
+
+      if (content !== undefined) {
+        params.content = truncate(content, 20_000)
+      }
+
+      return hasAssistantActionParams(params) ? params : undefined
+    }
     default:
       return undefined
   }
@@ -447,6 +541,14 @@ function actionTitle(
 
   if (spec.type === 'discord-type-draft' && params?.text) {
     return 'Type Discord draft'
+  }
+
+  if (spec.type === 'workspace-write-file' && params?.filePath) {
+    return `Write ${params.filePath}`
+  }
+
+  if (spec.type === 'workspace-read-file' && params?.filePath) {
+    return `Read ${params.filePath}`
   }
 
   return spec.title
@@ -485,6 +587,20 @@ function actionDescription(
   if (spec.type === 'discord-type-draft' && params?.text) {
     const target = params.url ? ` in ${params.url}` : ''
     return `Type this Discord Web draft${target} without pressing Enter or sending it: “${truncate(params.text, 160)}”`
+  }
+
+  if (spec.type === 'workspace-list-files') {
+    return params?.filePath
+      ? `List files in workspace directory “${params.filePath}”. Bonzi cannot list arbitrary folders.`
+      : "List files in Bonzi's dedicated writable workspace folder."
+  }
+
+  if (spec.type === 'workspace-read-file' && params?.filePath) {
+    return `Read “${params.filePath}” from Bonzi's dedicated writable workspace folder.`
+  }
+
+  if (spec.type === 'workspace-write-file' && params?.filePath) {
+    return `Write ${params.content?.length ?? 0} character${params.content?.length === 1 ? '' : 's'} to “${params.filePath}” inside Bonzi's dedicated writable workspace folder.`
   }
 
   return spec.description
@@ -546,6 +662,10 @@ function hasRequiredActionParams(
       return params?.direction === 'up' || params?.direction === 'down'
     case 'discord-type-draft':
       return Boolean(params?.text)
+    case 'workspace-read-file':
+      return Boolean(params?.filePath)
+    case 'workspace-write-file':
+      return Boolean(params?.filePath) && params?.content !== undefined
     default:
       return true
   }

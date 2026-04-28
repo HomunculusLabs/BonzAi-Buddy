@@ -6,7 +6,7 @@ import type {
 import { isRecord } from '../../shared/value-utils'
 
 const MAX_DOCUMENTS_PER_IMPORT = 20
-const MAX_SINGLE_DOCUMENT_BYTES = 1024 * 1024
+export const MAX_SINGLE_KNOWLEDGE_DOCUMENT_BYTES = 1024 * 1024
 const MAX_TOTAL_IMPORT_BYTES = 5 * 1024 * 1024
 const MAX_CHUNKS_PER_IMPORT = 500
 const TARGET_CHUNK_CHARS = 3500
@@ -18,6 +18,8 @@ export interface PreparedKnowledgeDocument {
   bytes: number
   lastModified?: number
   documentHash: string
+  relativePath?: string
+  sourceRootName?: string
   chunks: KnowledgeImportChunk[]
 }
 
@@ -33,6 +35,19 @@ export interface PreparedKnowledgeImport {
   documents: PreparedKnowledgeDocument[]
   rejectedDocuments: KnowledgeImportDocumentResult[]
 }
+
+export interface PrepareKnowledgeDocumentInput {
+  name: string
+  content: string
+  lastModified?: number
+  relativePath?: string
+  sourceRootName?: string
+  identityName?: string
+}
+
+export type PrepareKnowledgeDocumentResult =
+  | { ok: true; document: PreparedKnowledgeDocument }
+  | { ok: false; result: KnowledgeImportDocumentResult }
 
 export function prepareKnowledgeImportRequest(
   request: ImportKnowledgeDocumentsRequest
@@ -68,15 +83,12 @@ export function prepareKnowledgeImportRequest(
       continue
     }
 
-    const rawName = typeof document.name === 'string' ? document.name : ''
-    const sanitizedName = sanitizeDocumentName(rawName || `Document ${index + 1}.md`)
-    const name = truncateDocumentName(sanitizedName)
+    const name = typeof document.name === 'string' ? document.name : `Document ${index + 1}.md`
     const content = typeof document.content === 'string' ? document.content : null
-    const lastModified = normalizeLastModified(document.lastModified)
 
     if (content === null) {
       rejectedDocuments.push({
-        name,
+        name: truncateDocumentName(sanitizeDocumentName(name)),
         status: 'failed',
         bytes: 0,
         chunksImported: 0,
@@ -88,65 +100,18 @@ export function prepareKnowledgeImportRequest(
     const rawBytes = byteLength(content)
     totalBytes += rawBytes
 
-    if (rawBytes > MAX_SINGLE_DOCUMENT_BYTES) {
-      rejectedDocuments.push({
-        name,
-        status: 'failed',
-        bytes: rawBytes,
-        chunksImported: 0,
-        error: 'Markdown file must be 1 MiB or smaller.'
-      })
-      continue
-    }
-
-    if (!sanitizedName.toLowerCase().endsWith('.md')) {
-      rejectedDocuments.push({
-        name,
-        status: 'failed',
-        bytes: rawBytes,
-        chunksImported: 0,
-        error: 'Only .md Markdown files can be imported.'
-      })
-      continue
-    }
-
-    const normalizedContent = normalizeLineEndings(content).trim()
-    const bytes = rawBytes
-
-    if (!normalizedContent) {
-      rejectedDocuments.push({
-        name,
-        status: 'skipped',
-        bytes,
-        chunksImported: 0,
-        error: 'Markdown file was empty.'
-      })
-      continue
-    }
-
-    const documentHash = createHash('sha256')
-      .update(name)
-      .update('\0')
-      .update(normalizedContent)
-      .digest('hex')
-    const chunkTexts = chunkMarkdown(normalizedContent).map(
-      (chunk) => `Source: ${name}\n\n${chunk}`
-    )
-    totalChunks += chunkTexts.length
-
-    documents.push({
+    const prepared = prepareKnowledgeDocument({
       name,
-      bytes,
-      lastModified,
-      documentHash,
-      chunks: chunkTexts.map((text, chunkIndex) => ({
-        documentName: name,
-        documentHash,
-        chunkIndex,
-        chunkCount: chunkTexts.length,
-        text
-      }))
+      content,
+      lastModified: document.lastModified
     })
+
+    if (prepared.ok) {
+      totalChunks += prepared.document.chunks.length
+      documents.push(prepared.document)
+    } else {
+      rejectedDocuments.push(prepared.result)
+    }
   }
 
   if (totalBytes > MAX_TOTAL_IMPORT_BYTES) {
@@ -160,6 +125,97 @@ export function prepareKnowledgeImportRequest(
   }
 
   return { documents, rejectedDocuments }
+}
+
+export function prepareKnowledgeDocument(
+  input: PrepareKnowledgeDocumentInput
+): PrepareKnowledgeDocumentResult {
+  const sanitizedName = sanitizeDocumentName(input.name || 'knowledge.md')
+  const name = truncateDocumentName(sanitizedName)
+  const identityName = normalizeIdentityName(input.identityName ?? input.relativePath ?? name)
+  const relativePath = input.relativePath ? normalizeIdentityName(input.relativePath) : undefined
+  const sourceRootName = input.sourceRootName
+    ? truncateDocumentName(sanitizeDocumentName(input.sourceRootName))
+    : undefined
+  const bytes = byteLength(input.content)
+
+  if (bytes > MAX_SINGLE_KNOWLEDGE_DOCUMENT_BYTES) {
+    return {
+      ok: false,
+      result: {
+        name,
+        status: 'failed',
+        bytes,
+        chunksImported: 0,
+        error: 'Markdown file must be 1 MiB or smaller.',
+        relativePath,
+        sourceRootName
+      }
+    }
+  }
+
+  if (!identityName.toLowerCase().endsWith('.md')) {
+    return {
+      ok: false,
+      result: {
+        name,
+        status: 'failed',
+        bytes,
+        chunksImported: 0,
+        error: 'Only .md Markdown files can be imported.',
+        relativePath,
+        sourceRootName
+      }
+    }
+  }
+
+  const normalizedContent = normalizeLineEndings(input.content).trim()
+
+  if (!normalizedContent) {
+    return {
+      ok: false,
+      result: {
+        name,
+        status: 'skipped',
+        bytes,
+        chunksImported: 0,
+        error: 'Markdown file was empty.',
+        relativePath,
+        sourceRootName
+      }
+    }
+  }
+
+  const sourceLabel = sourceRootName && relativePath
+    ? `${sourceRootName}/${relativePath}`
+    : identityName
+  const documentHash = createHash('sha256')
+    .update(sourceLabel)
+    .update('\0')
+    .update(normalizedContent)
+    .digest('hex')
+  const chunkTexts = chunkMarkdown(normalizedContent).map(
+    (chunk) => `Source: ${sourceLabel}\n\n${chunk}`
+  )
+
+  return {
+    ok: true,
+    document: {
+      name,
+      bytes,
+      lastModified: normalizeLastModified(input.lastModified),
+      documentHash,
+      relativePath,
+      sourceRootName,
+      chunks: chunkTexts.map((text, chunkIndex) => ({
+        documentName: name,
+        documentHash,
+        chunkIndex,
+        chunkCount: chunkTexts.length,
+        text
+      }))
+    }
+  }
 }
 
 function sanitizeDocumentName(name: string): string {
@@ -178,6 +234,13 @@ function truncateDocumentName(name: string): string {
 
   const suffix = name.toLowerCase().endsWith('.md') ? name.slice(-3) : ''
   return `${name.slice(0, MAX_DOCUMENT_NAME_CHARS - suffix.length)}${suffix}`
+}
+
+function normalizeIdentityName(value: string): string {
+  return value
+    .trim()
+    .replace(/\\/gu, '/')
+    .replace(/[\u0000-\u001f\u007f]+/gu, '')
 }
 
 function normalizeLastModified(value: unknown): number | undefined {

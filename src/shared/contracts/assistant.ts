@@ -35,7 +35,10 @@ export const ASSISTANT_ACTION_TYPES = [
   'discord-read-context',
   'discord-read-screenshot',
   'discord-scroll',
-  'discord-type-draft'
+  'discord-type-draft',
+  'workspace-list-files',
+  'workspace-read-file',
+  'workspace-write-file'
 ] as const
 
 export type AssistantActionType = (typeof ASSISTANT_ACTION_TYPES)[number]
@@ -53,6 +56,8 @@ export interface AssistantActionParams {
   direction?: 'up' | 'down'
   amount?: number
   text?: string
+  filePath?: string
+  content?: string
 }
 
 export interface AssistantAction {

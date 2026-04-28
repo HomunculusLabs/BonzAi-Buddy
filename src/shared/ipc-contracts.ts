@@ -16,9 +16,14 @@ import type {
   UpdateElizaCharacterSettingsRequest
 } from './contracts/character'
 import type {
+  CancelKnowledgeImportRequest,
+  CancelKnowledgeImportResult,
   ImportKnowledgeDocumentsRequest,
+  ImportKnowledgeFoldersRequest,
   KnowledgeImportResult,
-  KnowledgeImportStatus
+  KnowledgeImportStatus,
+  SelectKnowledgeImportFoldersResult,
+  StartKnowledgeImportResult
 } from './contracts/knowledge'
 import type {
   ElizaPluginDiscoveryRequest,
@@ -29,6 +34,11 @@ import type {
   UpdateElizaPluginSettingsRequest
 } from './contracts/plugins'
 import type { ShellState } from './contracts/shell'
+import type {
+  BonziWorkspaceSettings,
+  ResetBonziWorkspaceFolderResult,
+  SelectBonziWorkspaceFolderResult
+} from './contracts/workspace'
 import type {
   BonziWorkflowRunSnapshot,
   CancelWorkflowRunRequest,
@@ -56,7 +66,13 @@ export const IPC_CHANNELS = {
     getElizaCharacterSettings: 'settings:get-eliza-character-settings',
     updateElizaCharacterSettings: 'settings:update-eliza-character-settings',
     importKnowledgeDocuments: 'settings:import-knowledge-documents',
-    getKnowledgeImportStatus: 'settings:get-knowledge-import-status'
+    selectKnowledgeImportFolders: 'settings:select-knowledge-import-folders',
+    importKnowledgeFolders: 'settings:import-knowledge-folders',
+    cancelKnowledgeImport: 'settings:cancel-knowledge-import',
+    getKnowledgeImportStatus: 'settings:get-knowledge-import-status',
+    getWorkspaceSettings: 'settings:get-workspace-settings',
+    selectWorkspaceFolder: 'settings:select-workspace-folder',
+    resetWorkspaceFolder: 'settings:reset-workspace-folder'
   },
   plugins: {
     discover: 'plugins:discover',
@@ -118,9 +134,33 @@ export type IpcInvokeChannelMap = {
     args: [request: ImportKnowledgeDocumentsRequest]
     response: KnowledgeImportResult
   }
+  [IPC_CHANNELS.settings.selectKnowledgeImportFolders]: {
+    args: []
+    response: SelectKnowledgeImportFoldersResult
+  }
+  [IPC_CHANNELS.settings.importKnowledgeFolders]: {
+    args: [request: ImportKnowledgeFoldersRequest]
+    response: StartKnowledgeImportResult
+  }
+  [IPC_CHANNELS.settings.cancelKnowledgeImport]: {
+    args: [request: CancelKnowledgeImportRequest]
+    response: CancelKnowledgeImportResult
+  }
   [IPC_CHANNELS.settings.getKnowledgeImportStatus]: {
     args: []
     response: KnowledgeImportStatus
+  }
+  [IPC_CHANNELS.settings.getWorkspaceSettings]: {
+    args: []
+    response: BonziWorkspaceSettings
+  }
+  [IPC_CHANNELS.settings.selectWorkspaceFolder]: {
+    args: []
+    response: SelectBonziWorkspaceFolderResult
+  }
+  [IPC_CHANNELS.settings.resetWorkspaceFolder]: {
+    args: []
+    response: ResetBonziWorkspaceFolderResult
   }
   [IPC_CHANNELS.plugins.discover]: {
     args: [request?: ElizaPluginDiscoveryRequest]
@@ -236,7 +276,17 @@ export interface BonziBridge {
     importKnowledgeDocuments: (
       request: ImportKnowledgeDocumentsRequest
     ) => Promise<KnowledgeImportResult>
+    selectKnowledgeImportFolders: () => Promise<SelectKnowledgeImportFoldersResult>
+    importKnowledgeFolders: (
+      request: ImportKnowledgeFoldersRequest
+    ) => Promise<StartKnowledgeImportResult>
+    cancelKnowledgeImport: (
+      request: CancelKnowledgeImportRequest
+    ) => Promise<CancelKnowledgeImportResult>
     getKnowledgeImportStatus: () => Promise<KnowledgeImportStatus>
+    getWorkspaceSettings: () => Promise<BonziWorkspaceSettings>
+    selectWorkspaceFolder: () => Promise<SelectBonziWorkspaceFolderResult>
+    resetWorkspaceFolder: () => Promise<ResetBonziWorkspaceFolderResult>
   }
   plugins: {
     discover: (request?: ElizaPluginDiscoveryRequest) => Promise<ElizaPluginSettings>

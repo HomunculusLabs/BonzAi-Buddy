@@ -12,6 +12,9 @@ export function sanitizeAssistantActionParams(
   const direction = normalizeScrollDirection(value.direction)
   const amount = normalizeScrollAmount(value.amount)
   const text = normalizeDiscordDraftText(value.text)
+  const filePath = normalizeWorkspaceFilePath(value.filePath)
+  const hasContent = typeof value.content === 'string'
+  const content = hasContent ? normalizeWorkspaceFileContent(value.content) : undefined
   const params: AssistantActionParams = {}
 
   if (url) {
@@ -34,6 +37,14 @@ export function sanitizeAssistantActionParams(
     params.text = truncate(text, 2_000)
   }
 
+  if (filePath) {
+    params.filePath = truncate(filePath, 500)
+  }
+
+  if (hasContent) {
+    params.content = truncate(content ?? '', 20_000)
+  }
+
   return hasAssistantActionParams(params) ? params : undefined
 }
 
@@ -45,7 +56,9 @@ export function hasAssistantActionParams(
       params?.query ||
       params?.direction ||
       params?.amount !== undefined ||
-      params?.text
+      params?.text ||
+      params?.filePath ||
+      params?.content !== undefined
   )
 }
 
@@ -93,6 +106,24 @@ export function normalizeDiscordDraftText(value: unknown): string {
   }
 
   return text
+}
+
+export function normalizeWorkspaceFilePath(value: unknown): string {
+  const text = normalizeText(value).replace(/\\/gu, '/')
+
+  if (!text || /[\x00-\x1F\x7F]/u.test(text)) {
+    return ''
+  }
+
+  return text
+}
+
+export function normalizeWorkspaceFileContent(value: unknown): string {
+  if (typeof value !== 'string') {
+    return ''
+  }
+
+  return value.replace(/\r\n?/gu, '\n').replace(/\u0000/gu, '')
 }
 
 export function truncate(value: string, maxLength: number): string {

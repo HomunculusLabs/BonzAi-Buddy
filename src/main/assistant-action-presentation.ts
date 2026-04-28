@@ -87,6 +87,27 @@ const ACTION_DEFAULTS: Record<
     description:
       'Use Discord Web in a browser session to type a draft into the composer. This will not press Enter or send the message.',
     requiresConfirmation: false
+  },
+  'workspace-list-files': {
+    type: 'workspace-list-files',
+    title: 'List workspace files',
+    description:
+      "List files in Bonzi's dedicated writable workspace folder. This cannot list arbitrary folders.",
+    requiresConfirmation: false
+  },
+  'workspace-read-file': {
+    type: 'workspace-read-file',
+    title: 'Read workspace file',
+    description:
+      "Read a UTF-8 text file from Bonzi's dedicated writable workspace folder.",
+    requiresConfirmation: false
+  },
+  'workspace-write-file': {
+    type: 'workspace-write-file',
+    title: 'Write workspace file',
+    description:
+      "Write a UTF-8 text file inside Bonzi's dedicated writable workspace folder.",
+    requiresConfirmation: true
   }
 }
 
@@ -105,7 +126,9 @@ export function createPendingAssistantAction(
     type: action.type,
     title: action.title?.trim() || defaults.title,
     description:
-      requiresConfirmation && options.approvalsEnabled === false
+      requiresConfirmation &&
+      options.approvalsEnabled === false &&
+      action.type !== 'workspace-write-file'
         ? `${description} Approvals are currently disabled, so this will run when clicked.`
         : description,
     requiresConfirmation,

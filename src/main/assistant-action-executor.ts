@@ -19,11 +19,13 @@ import {
   truncate
 } from './assistant-action-param-utils'
 import { describeImageWithVision } from './vision-client'
+import type { BonziWorkspaceFileService } from './bonzi-workspace-file-service'
 
 interface AssistantActionExecutorDeps {
   shellState: ShellState
   companionWindow: BrowserWindow | null
   discordBrowserService: DiscordBrowserActionService
+  workspaceFileService: BonziWorkspaceFileService
 }
 
 export interface WorkflowBonziDesktopActionProposal {
@@ -39,8 +41,7 @@ export async function executeWorkflowBonziDesktopAction(
 ): Promise<string> {
   const params = sanitizeAssistantActionParams(proposal.params)
   const requiresConfirmation =
-    proposal.requiresConfirmation === true ||
-    proposal.type === 'close-window'
+    proposal.requiresConfirmation === true || requiresConfirmationByPolicy(proposal.type)
 
   if (requiresConfirmation && !options.approved) {
     throw new Error(
@@ -71,6 +72,7 @@ export async function executeAssistantAction(
         `Stage: ${deps.shellState.stage}`,
         `Platform: ${deps.shellState.platform}`,
         `VRM asset: ${deps.shellState.vrmAssetPath}`,
+        `Workspace: ${deps.workspaceFileService.getWorkspaceDir()}`,
         `Provider: ${deps.shellState.assistant.provider.label}`,
         `Runtime: ${deps.shellState.assistant.runtime.backend} / ${deps.shellState.assistant.runtime.state}`
       ].join('\n')
@@ -117,6 +119,19 @@ export async function executeAssistantAction(
         url: action.params?.url,
         text: action.params?.text ?? ''
       })
+    case 'workspace-list-files':
+      return deps.workspaceFileService.listFiles({
+        directoryPath: action.params?.filePath
+      })
+    case 'workspace-read-file':
+      return deps.workspaceFileService.readTextFile({
+        filePath: action.params?.filePath ?? ''
+      })
+    case 'workspace-write-file':
+      return deps.workspaceFileService.writeTextFile({
+        filePath: action.params?.filePath ?? '',
+        content: action.params?.content ?? ''
+      })
     default:
       return assertNever(action.type)
   }
@@ -145,6 +160,10 @@ async function readDiscordScreenshotWithVision(query: string | undefined): Promi
     'Cua accessibility context:',
     screenshot.stateText
   ].join('\n')
+}
+
+function requiresConfirmationByPolicy(type: AssistantActionType): boolean {
+  return type === 'close-window' || type === 'workspace-write-file'
 }
 
 function resolveSafeHttpUrl(rawUrl: unknown): URL {

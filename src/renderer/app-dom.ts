@@ -20,6 +20,7 @@ export interface MountedAppElements {
   settingsPanelEl: HTMLElement
   characterSettingsEl: HTMLElement
   knowledgeSettingsEl: HTMLElement
+  workspaceSettingsEl: HTMLElement
   approvalSettingsEl: HTMLElement
   pluginSettingsEl: HTMLElement
   settingsStatusEl: HTMLElement
@@ -195,6 +196,8 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
                   </select>
                 </label>
               </div>
+
+              <div class="settings-panel__section workspace-settings" data-workspace-settings></div>
             </section>
 
             <section
@@ -341,6 +344,9 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
   const knowledgeSettingsEl = root.querySelector<HTMLElement>(
     '[data-knowledge-settings]'
   )
+  const workspaceSettingsEl = root.querySelector<HTMLElement>(
+    '[data-workspace-settings]'
+  )
   const pluginSettingsEl = root.querySelector<HTMLElement>('[data-plugin-settings]')
   const settingsStatusEl = root.querySelector<HTMLElement>('[data-settings-status]')
   const buddySelectEl = root.querySelector<HTMLSelectElement>('[data-buddy-select]')
@@ -371,6 +377,7 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
     !characterSettingsEl ||
     !approvalSettingsEl ||
     !knowledgeSettingsEl ||
+    !workspaceSettingsEl ||
     !pluginSettingsEl ||
     !settingsStatusEl ||
     !buddySelectEl ||
@@ -401,6 +408,7 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
     settingsPanelEl,
     characterSettingsEl,
     knowledgeSettingsEl,
+    workspaceSettingsEl,
     approvalSettingsEl,
     pluginSettingsEl,
     settingsStatusEl,

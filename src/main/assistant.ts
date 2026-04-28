@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron'
+import { app, type BrowserWindow } from 'electron'
 import {
   type AssistantActionExecutionRequest,
   type AssistantActionExecutionResponse,
@@ -12,6 +12,9 @@ import {
   type AssistantProviderInfo,
   type AssistantRuntimeStatus,
   type BonziWorkflowRunSnapshot,
+  type BonziWorkspaceSettings,
+  type CancelKnowledgeImportRequest,
+  type CancelKnowledgeImportResult,
   type ElizaCharacterSettings,
   type ElizaPluginDiscoveryRequest,
   type RespondWorkflowApprovalRequest,
@@ -22,12 +25,14 @@ import {
   type ElizaPluginSettings,
   type ElizaPluginUninstallRequest,
   type ImportKnowledgeDocumentsRequest,
+  type ImportKnowledgeFoldersRequest,
   type KnowledgeImportResult,
   type KnowledgeImportStatus,
   type UpdateElizaCharacterSettingsRequest,
   type UpdateElizaPluginSettingsRequest,
   type UpdateRuntimeApprovalSettingsRequest,
-  type ShellState
+  type ShellState,
+  type StartKnowledgeImportResult
 } from '../shared/contracts'
 import { normalizeError } from '../shared/value-utils'
 import { BonziRuntimeManager } from './eliza/runtime-manager'
@@ -38,6 +43,7 @@ import {
   normalizeWorkflowApprovalRequest
 } from './assistant-request-normalization'
 import { createDiscordBrowserServiceFromEnv } from './discord-browser-service'
+import { BonziWorkspaceFileService } from './bonzi-workspace-file-service'
 import { PendingAssistantActions } from './pending-assistant-actions'
 import { BonziWorkflowContinuationCoordinator } from './workflow-continuation-coordinator'
 
@@ -62,7 +68,16 @@ export interface AssistantService {
   importKnowledgeDocuments: (
     request: ImportKnowledgeDocumentsRequest
   ) => Promise<KnowledgeImportResult>
-  getKnowledgeImportStatus: () => KnowledgeImportStatus
+  startKnowledgeFolderImport: (
+    request: ImportKnowledgeFoldersRequest
+  ) => Promise<StartKnowledgeImportResult>
+  cancelKnowledgeImport: (
+    request: CancelKnowledgeImportRequest
+  ) => Promise<CancelKnowledgeImportResult>
+  getKnowledgeImportStatus: () => Promise<KnowledgeImportStatus>
+  getWorkspaceSettings: () => Promise<BonziWorkspaceSettings>
+  setWorkspaceFolder: (folderPath: string) => Promise<BonziWorkspaceSettings>
+  resetWorkspaceFolder: () => Promise<BonziWorkspaceSettings>
   discoverPlugins: (
     request?: ElizaPluginDiscoveryRequest
   ) => Promise<ElizaPluginSettings>
@@ -101,10 +116,14 @@ export function createAssistantService(
   options: AssistantServiceOptions
 ): AssistantService {
   const discordBrowserService = createDiscordBrowserServiceFromEnv()
+  const workspaceFileService = new BonziWorkspaceFileService({
+    userDataDir: app.getPath('userData')
+  })
   const runtimeManager = new BonziRuntimeManager({
     getShellState: options.getShellState,
     getCompanionWindow: options.getCompanionWindow,
-    discordBrowserService
+    discordBrowserService,
+    workspaceFileService
   })
   let continuationCoordinator: BonziWorkflowContinuationCoordinator
   const pendingActions = new PendingAssistantActions({
@@ -112,6 +131,7 @@ export function createAssistantService(
     getCompanionWindow: options.getCompanionWindow,
     getApprovalSettings: () => runtimeManager.getRuntimeApprovalSettings(),
     discordBrowserService,
+    workspaceFileService,
     linkExternalAction: (action) => {
       runtimeManager.linkExternalAction(action)
     },
@@ -149,7 +169,14 @@ export function createAssistantService(
     },
     importKnowledgeDocuments: (request) =>
       runtimeManager.importKnowledgeDocuments(request),
+    startKnowledgeFolderImport: (request) =>
+      runtimeManager.startKnowledgeFolderImport(request),
+    cancelKnowledgeImport: (request) =>
+      runtimeManager.cancelKnowledgeImport(request),
     getKnowledgeImportStatus: () => runtimeManager.getKnowledgeImportStatus(),
+    getWorkspaceSettings: async () => workspaceFileService.getSettings(),
+    setWorkspaceFolder: (folderPath) => workspaceFileService.setWorkspaceDir(folderPath),
+    resetWorkspaceFolder: () => workspaceFileService.resetWorkspaceDir(),
     discoverPlugins: (request) => runtimeManager.discoverPlugins(request),
     updatePluginSettings: (request) => runtimeManager.updatePluginSettings(request),
     installPlugin: (request) => runtimeManager.installPlugin(request),

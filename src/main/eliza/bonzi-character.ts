@@ -38,7 +38,7 @@ const DEFAULT_BONZI_MESSAGE_EXAMPLES: SanitizedBonziMessageExample[][] = [
     {
       name: DEFAULT_BONZI_CHARACTER_NAME,
       content: {
-        text: "I can't run shell commands or make unrestricted file changes. If there's an allowlisted Bonzi action that helps with a safer version of the task, I can suggest that instead."
+        text: "I can't run shell commands or make unrestricted file changes. I can only write small text files through Bonzi's dedicated workspace action when you approve it."
       }
     }
   ],
@@ -91,6 +91,7 @@ const DEFAULT_BONZI_TOPICS: string[] = [
   'Bonzi runtime context',
   'confirmation-aware actions',
   'safe automation boundaries',
+  'workspace-scoped file writing',
   'Electron apps',
   'web search help',
   'Discord inspection help',
@@ -238,7 +239,8 @@ function createBonziRuntimeSafetyAppendix(options: {
   return `Bonzi runtime safety rules (non-removable):
 - Do not output JSON envelopes. Use the runtime's normal XML response/action format.
 - Use REPLY when you only need to chat.
-- Never propose shell commands, file writes, network calls, or unrestricted execution.
+- Never propose shell commands, unrestricted file writes, raw network calls, or unrestricted execution.
+- File reads/writes are only allowed through Bonzi workspace actions, using relative paths inside the dedicated Bonzi workspace folder.
 ${actionRule}
 ${approvalRule}
 ${contextRule}`
@@ -333,7 +335,8 @@ Rules:
 - Do not output JSON envelopes. Use the runtime's normal XML response/action format.
 - Use REPLY when you only need to chat.
 ${desktopActionRule}
-- Never propose shell commands, file writes, network calls, or any unrestricted execution.
+- Never propose shell commands, unrestricted file writes, raw network calls, or any unrestricted execution.
+- File reads/writes are only allowed through Bonzi workspace actions, using relative paths inside the dedicated Bonzi workspace folder.
 ${approvalRule}
 ${contextRule}`
 }

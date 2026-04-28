@@ -16,10 +16,14 @@ import {
   type ElizaPluginOperationResult,
   type ElizaPluginSettings,
   type ElizaPluginUninstallRequest,
+  type CancelKnowledgeImportRequest,
+  type CancelKnowledgeImportResult,
   type ImportKnowledgeDocumentsRequest,
+  type ImportKnowledgeFoldersRequest,
   type KnowledgeImportResult,
   type KnowledgeImportStatus,
   type RuntimeApprovalSettings,
+  type StartKnowledgeImportResult,
   type ShellState,
   type UpdateElizaCharacterSettingsRequest,
   type UpdateElizaPluginSettingsRequest,
@@ -27,6 +31,7 @@ import {
 } from '../../shared/contracts'
 import { executeWorkflowBonziDesktopAction } from '../assistant-action-executor'
 import type { DiscordBrowserActionService } from '../discord-browser-service'
+import type { BonziWorkspaceFileService } from '../bonzi-workspace-file-service'
 import { normalizeError } from '../../shared/value-utils'
 import { BonziPluginDiscoveryService } from './plugin-discovery'
 import { BonziPluginInstallationService } from './plugin-installer'
@@ -53,6 +58,7 @@ interface BonziRuntimeManagerOptions {
   getShellState: () => ShellState
   getCompanionWindow?: () => BrowserWindow | null
   discordBrowserService: DiscordBrowserActionService
+  workspaceFileService: BonziWorkspaceFileService
   dataDir?: string
   workflowRunsPath?: string
 }
@@ -80,6 +86,7 @@ export class BonziRuntimeManager {
   constructor(options: BonziRuntimeManagerOptions) {
     this.getShellState = options.getShellState
     this.getCompanionWindow = options.getCompanionWindow ?? (() => null)
+    const runtimeDataDir = options.dataDir ?? join(app.getPath('userData'), 'eliza-localdb')
     this.workflowManager = new BonziWorkflowManager({
       persistencePath: options.workflowRunsPath
     })
@@ -98,7 +105,8 @@ export class BonziRuntimeManager {
               {
                 shellState: this.getShellState(),
                 companionWindow: this.getCompanionWindow(),
-                discordBrowserService: options.discordBrowserService
+                discordBrowserService: options.discordBrowserService,
+                workspaceFileService: options.workspaceFileService
               },
               { approved }
             )
@@ -130,7 +138,7 @@ export class BonziRuntimeManager {
       }
     })
     this.lifecycle = new BonziRuntimeLifecycle({
-      dataDir: options.dataDir ?? join(app.getPath('userData'), 'eliza-localdb'),
+      dataDir: runtimeDataDir,
       configState: this.configState,
       pluginSettingsStore: this.pluginSettingsStore,
       pluginRuntimeResolver: this.pluginRuntimeResolver,
@@ -144,6 +152,7 @@ export class BonziRuntimeManager {
     })
     this.memoryService = new BonziRuntimeMemoryService({
       getRuntime: () => this.lifecycle.getOrCreateRuntime(),
+      knowledgeImportManifestPath: join(runtimeDataDir, 'knowledge-import-manifest.json'),
       canSkipHistoryRuntimeHydration: () =>
         this.lifecycle.canSkipHistoryRuntimeHydration()
     })
@@ -210,7 +219,19 @@ export class BonziRuntimeManager {
     return this.memoryService.importKnowledgeDocuments(request)
   }
 
-  getKnowledgeImportStatus(): KnowledgeImportStatus {
+  startKnowledgeFolderImport(
+    request: ImportKnowledgeFoldersRequest
+  ): Promise<StartKnowledgeImportResult> {
+    return this.memoryService.startKnowledgeFolderImport(request)
+  }
+
+  cancelKnowledgeImport(
+    request: CancelKnowledgeImportRequest
+  ): Promise<CancelKnowledgeImportResult> {
+    return this.memoryService.cancelKnowledgeImport(request)
+  }
+
+  getKnowledgeImportStatus(): Promise<KnowledgeImportStatus> {
     return this.memoryService.getKnowledgeImportStatus()
   }
 

@@ -71,8 +71,20 @@ const bonziApi = {
       invoke(IPC_CHANNELS.settings.updateElizaCharacterSettings, request),
     importKnowledgeDocuments: (request) =>
       invoke(IPC_CHANNELS.settings.importKnowledgeDocuments, request),
+    selectKnowledgeImportFolders: () =>
+      invoke(IPC_CHANNELS.settings.selectKnowledgeImportFolders),
+    importKnowledgeFolders: (request) =>
+      invoke(IPC_CHANNELS.settings.importKnowledgeFolders, request),
+    cancelKnowledgeImport: (request) =>
+      invoke(IPC_CHANNELS.settings.cancelKnowledgeImport, request),
     getKnowledgeImportStatus: () =>
-      invoke(IPC_CHANNELS.settings.getKnowledgeImportStatus)
+      invoke(IPC_CHANNELS.settings.getKnowledgeImportStatus),
+    getWorkspaceSettings: () =>
+      invoke(IPC_CHANNELS.settings.getWorkspaceSettings),
+    selectWorkspaceFolder: () =>
+      invoke(IPC_CHANNELS.settings.selectWorkspaceFolder),
+    resetWorkspaceFolder: () =>
+      invoke(IPC_CHANNELS.settings.resetWorkspaceFolder)
   },
   plugins: {
     discover: (request) => invoke(IPC_CHANNELS.plugins.discover, request),

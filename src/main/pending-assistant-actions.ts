@@ -11,6 +11,7 @@ import { normalizeError } from '../shared/value-utils'
 import { executeAssistantAction } from './assistant-action-executor'
 import { createPendingAssistantAction } from './assistant-action-presentation'
 import type { DiscordBrowserActionService } from './discord-browser-service'
+import type { BonziWorkspaceFileService } from './bonzi-workspace-file-service'
 import type { BonziProposedAction } from './eliza/runtime-manager'
 
 interface PendingAssistantActionsOptions {
@@ -18,6 +19,7 @@ interface PendingAssistantActionsOptions {
   getCompanionWindow: () => BrowserWindow | null
   getApprovalSettings: () => RuntimeApprovalSettings
   discordBrowserService: DiscordBrowserActionService
+  workspaceFileService: BonziWorkspaceFileService
   linkExternalAction: (action: AssistantAction) => void
   markExternalActionRunning: (action: AssistantAction) => void
   onActionUpdated: (action: AssistantAction) => void
@@ -40,6 +42,7 @@ interface PendingActionExecutionEnvironment {
   getShellState: () => ShellState
   getCompanionWindow: () => BrowserWindow | null
   discordBrowserService: DiscordBrowserActionService
+  workspaceFileService: BonziWorkspaceFileService
 }
 
 interface PendingActionWorkflowHooks {
@@ -97,7 +100,8 @@ class PendingAssistantActionRunner {
       const message = await executeAssistantAction(runningAction, {
         shellState: this.environment.getShellState(),
         companionWindow: this.environment.getCompanionWindow(),
-        discordBrowserService: this.environment.discordBrowserService
+        discordBrowserService: this.environment.discordBrowserService,
+        workspaceFileService: this.environment.workspaceFileService
       })
 
       return this.finish({
@@ -176,7 +180,8 @@ export class PendingAssistantActions {
       {
         getShellState: options.getShellState,
         getCompanionWindow: options.getCompanionWindow,
-        discordBrowserService: options.discordBrowserService
+        discordBrowserService: options.discordBrowserService,
+        workspaceFileService: options.workspaceFileService
       },
       {
         markExternalActionRunning: options.markExternalActionRunning,
@@ -199,7 +204,10 @@ export class PendingAssistantActions {
     for (const proposal of proposals) {
       const pendingAction = this.createPendingAction(proposal, approvalSettings)
 
-      if (approvalSettings.approvalsEnabled) {
+      if (
+        approvalSettings.approvalsEnabled ||
+        requiresNonBypassableConfirmation(pendingAction)
+      ) {
         actions.push(pendingAction)
         continue
       }
@@ -288,8 +296,12 @@ export class PendingAssistantActions {
     request: { confirmed: boolean }
   ): AssistantActionExecutionResponse | null {
     const approvalsEnabled = this.options.getApprovalSettings().approvalsEnabled
+    const requiresPolicyConfirmation = requiresNonBypassableConfirmation(action)
+    const requiresConfirmation =
+      (action.requiresConfirmation || requiresPolicyConfirmation) &&
+      (approvalsEnabled || requiresPolicyConfirmation)
 
-    if (!approvalsEnabled || !action.requiresConfirmation || request.confirmed) {
+    if (!requiresConfirmation || request.confirmed) {
       return null
     }
 
@@ -308,4 +320,8 @@ export class PendingAssistantActions {
       confirmationRequired: true
     }
   }
+}
+
+function requiresNonBypassableConfirmation(action: AssistantAction): boolean {
+  return action.type === 'workspace-write-file'
 }
