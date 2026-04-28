@@ -1,7 +1,6 @@
 import { app, type BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import {
-  ASSISTANT_ACTION_TYPES,
   type AssistantAction,
   type AssistantActionType,
   type AssistantEvent,
@@ -30,8 +29,8 @@ import {
   type UpdateRuntimeApprovalSettingsRequest
 } from '../../shared/contracts'
 import { executeWorkflowBonziDesktopAction } from '../assistant-action-executor'
-import type { DiscordBrowserActionService } from '../discord-browser-service'
 import type { BonziWorkspaceFileService } from '../bonzi-workspace-file-service'
+import type { DiscordBrowserActionService } from '../discord-browser-service'
 import { normalizeError } from '../../shared/value-utils'
 import { BonziPluginDiscoveryService } from './plugin-discovery'
 import { BonziPluginInstallationService } from './plugin-installer'
@@ -41,15 +40,16 @@ import { BonziRuntimeConfigState } from './runtime-config-state'
 import { BonziRuntimeEventEmitter } from './runtime-event-emitter'
 import { BonziRuntimeLifecycle } from './runtime-lifecycle'
 import { BonziRuntimeMemoryService } from './runtime-memory-service'
+import { BonziRuntimePluginOperations } from './runtime-plugin-operations'
 import {
   BonziRuntimeTurnRunner,
   type BonziRuntimeTurn
 } from './runtime-turn-runner'
+import { BonziRuntimeWorkflowBridge } from './runtime-workflow-bridge'
 import {
   BonziWorkflowManager,
   type WorkflowExternalActionState
 } from './workflow-manager'
-import { isTerminalRunStatus } from './workflow-snapshot-utils'
 
 export type { BonziProposedAction } from './runtime-action-proposals'
 export type { BonziRuntimeTurn } from './runtime-turn-runner'
@@ -77,10 +77,12 @@ export class BonziRuntimeManager {
     discoveryService: this.pluginDiscoveryService
   })
   private readonly pluginRuntimeResolver: BonziPluginRuntimeResolver
+  private readonly pluginOperations: BonziRuntimePluginOperations
   private readonly workflowManager: BonziWorkflowManager
   private readonly lifecycle: BonziRuntimeLifecycle
   private readonly memoryService: BonziRuntimeMemoryService
   private readonly turnRunner: BonziRuntimeTurnRunner
+  private readonly workflowBridge: BonziRuntimeWorkflowBridge
   private readonly unsubscribeWorkflowEvents: () => void
 
   constructor(options: BonziRuntimeManagerOptions) {
@@ -150,6 +152,19 @@ export class BonziRuntimeManager {
         })
       }
     })
+    this.pluginOperations = new BonziRuntimePluginOperations({
+      settingsStore: this.pluginSettingsStore,
+      discoveryService: this.pluginDiscoveryService,
+      installationService: this.pluginInstallationService,
+      getProviderInfo: () => this.getProviderInfo(),
+      waitForRuntimeInitialization: () => this.lifecycle.waitForInitialization(),
+      invalidateRuntimeConfig: () => {
+        this.lifecycle.invalidateConfigSignature()
+      },
+      setWorkflowApprovalsEnabled: (enabled) => {
+        this.workflowManager.setApprovalsEnabled(enabled)
+      }
+    })
     this.memoryService = new BonziRuntimeMemoryService({
       getRuntime: () => this.lifecycle.getOrCreateRuntime(),
       knowledgeImportManifestPath: join(runtimeDataDir, 'knowledge-import-manifest.json'),
@@ -160,6 +175,11 @@ export class BonziRuntimeManager {
       configState: this.configState,
       getRuntime: () => this.lifecycle.getOrCreateRuntime(),
       workflowManager: this.workflowManager
+    })
+    this.workflowBridge = new BonziRuntimeWorkflowBridge({
+      workflowManager: this.workflowManager,
+      memoryService: this.memoryService,
+      turnRunner: this.turnRunner
     })
     this.unsubscribeWorkflowEvents = this.workflowManager.subscribe((run) => {
       this.events.emit({
@@ -185,32 +205,27 @@ export class BonziRuntimeManager {
   }
 
   getPluginSettings(): ElizaPluginSettings {
-    return this.pluginSettingsStore.getSettings(this.getProviderInfo())
+    return this.pluginOperations.getPluginSettings()
   }
 
   getRuntimeApprovalSettings(): RuntimeApprovalSettings {
-    return this.pluginSettingsStore.getRuntimeApprovalSettings()
+    return this.pluginOperations.getRuntimeApprovalSettings()
   }
 
   updateRuntimeApprovalSettings(
     request: UpdateRuntimeApprovalSettingsRequest
   ): RuntimeApprovalSettings {
-    const settings = this.pluginSettingsStore.updateRuntimeApprovalSettings(request)
-    this.workflowManager.setApprovalsEnabled(settings.approvalsEnabled)
-    this.lifecycle.invalidateConfigSignature()
-    return settings
+    return this.pluginOperations.updateRuntimeApprovalSettings(request)
   }
 
   getCharacterSettings(): ElizaCharacterSettings {
-    return this.pluginSettingsStore.getCharacterSettings()
+    return this.pluginOperations.getCharacterSettings()
   }
 
   updateCharacterSettings(
     request: UpdateElizaCharacterSettingsRequest
   ): ElizaCharacterSettings {
-    const settings = this.pluginSettingsStore.updateCharacterSettings(request)
-    this.lifecycle.invalidateConfigSignature()
-    return settings
+    return this.pluginOperations.updateCharacterSettings(request)
   }
 
   importKnowledgeDocuments(
@@ -238,45 +253,23 @@ export class BonziRuntimeManager {
   async discoverPlugins(
     request: ElizaPluginDiscoveryRequest = {}
   ): Promise<ElizaPluginSettings> {
-    return this.pluginDiscoveryService.discover(this.getProviderInfo(), request)
+    return this.pluginOperations.discoverPlugins(request)
   }
 
   async installPlugin(
     request: ElizaPluginInstallRequest
   ): Promise<ElizaPluginOperationResult> {
-    const result = await this.pluginInstallationService.install(
-      this.getProviderInfo(),
-      request
-    )
-
-    if (result.ok) {
-      this.lifecycle.invalidateConfigSignature()
-    }
-
-    return result
+    return this.pluginOperations.installPlugin(request)
   }
 
   async uninstallPlugin(
     request: ElizaPluginUninstallRequest
   ): Promise<ElizaPluginOperationResult> {
-    const effectiveRequest = this.getRuntimeApprovalSettings().approvalsEnabled
-      ? request
-      : { ...request, confirmed: true }
-    const result = await this.pluginInstallationService.uninstall(
-      this.getProviderInfo(),
-      effectiveRequest
-    )
-
-    if (result.ok) {
-      this.lifecycle.invalidateConfigSignature()
-    }
-
-    return result
+    return this.pluginOperations.uninstallPlugin(request)
   }
 
   getAvailableActionTypes(): AssistantActionType[] {
-    const settings = this.pluginSettingsStore.getRuntimeSettings()
-    return settings.desktopActionsEnabled ? [...ASSISTANT_ACTION_TYPES] : []
+    return this.pluginOperations.getAvailableActionTypes()
   }
 
   getWorkflowRuns(): BonziWorkflowRunSnapshot[] {
@@ -302,15 +295,7 @@ export class BonziRuntimeManager {
   async updatePluginSettings(
     request: UpdateElizaPluginSettingsRequest
   ): Promise<ElizaPluginSettings> {
-    const settings = this.pluginSettingsStore.updateSettings(
-      request,
-      this.getProviderInfo()
-    )
-
-    await this.lifecycle.waitForInitialization()
-    this.lifecycle.invalidateConfigSignature()
-
-    return settings
+    return this.pluginOperations.updatePluginSettings(request)
   }
 
   subscribe(listener: (event: AssistantEvent) => void): () => void {
@@ -329,37 +314,24 @@ export class BonziRuntimeManager {
     return this.lifecycle.reloadRuntime()
   }
 
-  async recordActionObservation(action: {
-    type: AssistantActionType
-    title: string
-    status: string
-    params?: unknown
-  }, resultMessage: string): Promise<void> {
-    return this.memoryService.recordActionObservation(action, resultMessage)
+  async recordActionObservation(
+    action: {
+      type: AssistantActionType
+      title: string
+      status: string
+      params?: unknown
+    },
+    resultMessage: string
+  ): Promise<void> {
+    return this.workflowBridge.recordActionObservation(action, resultMessage)
   }
 
   linkExternalAction(action: AssistantAction): BonziWorkflowRunSnapshot | null {
-    if (!action.workflowRunId || !action.workflowStepId) {
-      return null
-    }
-
-    return this.workflowManager.linkExternalAction({
-      runId: action.workflowRunId,
-      stepId: action.workflowStepId,
-      actionId: action.id
-    })
+    return this.workflowBridge.linkExternalAction(action)
   }
 
   markExternalActionRunning(action: AssistantAction): BonziWorkflowRunSnapshot | null {
-    if (!action.workflowRunId || !action.workflowStepId) {
-      return null
-    }
-
-    return this.workflowManager.runExternalAction({
-      runId: action.workflowRunId,
-      stepId: action.workflowStepId,
-      detail: `Running ${action.title}.`
-    })
+    return this.workflowBridge.markExternalActionRunning(action)
   }
 
   async recordExternalActionObservation(
@@ -369,35 +341,7 @@ export class BonziRuntimeManager {
     workflowRun?: BonziWorkflowRunSnapshot
     shouldConsiderContinuation: boolean
   }> {
-    await this.memoryService.recordActionObservation(action, resultMessage)
-
-    if (!action.workflowRunId || !action.workflowStepId) {
-      return { shouldConsiderContinuation: false }
-    }
-
-    const workflowRun =
-      action.status === 'failed'
-        ? this.workflowManager.failExternalAction({
-            runId: action.workflowRunId,
-            stepId: action.workflowStepId,
-            detail: resultMessage
-          })
-        : this.workflowManager.completeExternalAction({
-            runId: action.workflowRunId,
-            stepId: action.workflowStepId,
-            detail: resultMessage
-          })
-
-    if (!workflowRun) {
-      return { shouldConsiderContinuation: false }
-    }
-
-    return {
-      workflowRun,
-      shouldConsiderContinuation:
-        !isTerminalRunStatus(workflowRun.status) &&
-        workflowRun.status !== 'cancel_requested'
-    }
+    return this.workflowBridge.recordExternalActionObservation(action, resultMessage)
   }
 
   async continueWorkflowAfterAction(input: {
@@ -405,40 +349,23 @@ export class BonziRuntimeManager {
     observation: string
     continuationIndex: number
   }): Promise<BonziRuntimeTurn | null> {
-    const runId = input.action.workflowRunId
-
-    if (!runId) {
-      return null
-    }
-
-    const run = this.workflowManager.getRun(runId)
-
-    if (!run || isTerminalRunStatus(run.status) || run.status === 'cancel_requested') {
-      return null
-    }
-
-    return this.turnRunner.continueWorkflow({
-      runId,
-      action: input.action,
-      observation: input.observation,
-      continuationIndex: input.continuationIndex
-    })
+    return this.workflowBridge.continueWorkflowAfterAction(input)
   }
 
   getExternalActionState(runId: string): WorkflowExternalActionState {
-    return this.workflowManager.getExternalActionState(runId)
+    return this.workflowBridge.getExternalActionState(runId)
   }
 
   hasOpenExternalActions(runId: string): boolean {
-    return this.workflowManager.hasOpenExternalActions(runId)
+    return this.workflowBridge.hasOpenExternalActions(runId)
   }
 
   hasAwaitingExternalActions(runId: string): boolean {
-    return this.hasOpenExternalActions(runId)
+    return this.workflowBridge.hasAwaitingExternalActions(runId)
   }
 
   failWorkflowRun(runId: string, error: string): BonziWorkflowRunSnapshot | null {
-    return this.workflowManager.failRun(runId, { error })
+    return this.workflowBridge.failWorkflowRun(runId, error)
   }
 
   emitAssistantActionUpdated(action: AssistantAction): void {

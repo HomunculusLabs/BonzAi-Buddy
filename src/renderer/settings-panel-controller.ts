@@ -1,8 +1,6 @@
-import {
-  type ElizaPluginSettings,
-  type RuntimeApprovalSettings,
-  type ShellState
-} from '../shared/contracts'
+import type { RuntimeApprovalSettings } from '../shared/contracts/approvals'
+import type { ElizaPluginSettings } from '../shared/contracts/plugins'
+import type { ShellState } from '../shared/contracts/shell'
 import type { MountedAppElements } from './app-dom'
 import {
   createPluginSettingsController,

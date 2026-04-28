@@ -34,14 +34,10 @@ import {
   type ShellState,
   type StartKnowledgeImportResult
 } from '../shared/contracts'
-import { normalizeError } from '../shared/value-utils'
+import { AssistantActionUseCase } from './assistant-action-use-case'
+import { AssistantCommandUseCase } from './assistant-command-use-case'
+import { AssistantWorkflowUseCase } from './assistant-workflow-use-case'
 import { BonziRuntimeManager } from './eliza/runtime-manager'
-import {
-  normalizeActionExecutionRequest,
-  normalizeCancelWorkflowRequest,
-  normalizeCommandRequest,
-  normalizeWorkflowApprovalRequest
-} from './assistant-request-normalization'
 import { createDiscordBrowserServiceFromEnv } from './discord-browser-service'
 import { BonziWorkspaceFileService } from './bonzi-workspace-file-service'
 import { PendingAssistantActions } from './pending-assistant-actions'
@@ -149,6 +145,13 @@ export function createAssistantService(
     pendingActions,
     createAssistantMessage
   })
+  const commandUseCase = new AssistantCommandUseCase({
+    runtimeManager,
+    pendingActions,
+    createAssistantMessage
+  })
+  const actionUseCase = new AssistantActionUseCase({ pendingActions })
+  const workflowUseCase = new AssistantWorkflowUseCase({ runtimeManager })
 
   return {
     getProviderInfo: () => runtimeManager.getProviderInfo(),
@@ -156,15 +159,11 @@ export function createAssistantService(
     getRuntimeStatus: () => runtimeManager.getRuntimeStatus(),
     getPluginSettings: () => runtimeManager.getPluginSettings(),
     getRuntimeApprovalSettings: () => runtimeManager.getRuntimeApprovalSettings(),
-    async updateRuntimeApprovalSettings(
-      request: UpdateRuntimeApprovalSettingsRequest
-    ): Promise<RuntimeApprovalSettings> {
+    async updateRuntimeApprovalSettings(request): Promise<RuntimeApprovalSettings> {
       return runtimeManager.updateRuntimeApprovalSettings(request)
     },
     getCharacterSettings: () => runtimeManager.getCharacterSettings(),
-    async updateCharacterSettings(
-      request: UpdateElizaCharacterSettingsRequest
-    ): Promise<ElizaCharacterSettings> {
+    async updateCharacterSettings(request): Promise<ElizaCharacterSettings> {
       return runtimeManager.updateCharacterSettings(request)
     },
     importKnowledgeDocuments: (request) =>
@@ -196,122 +195,11 @@ export function createAssistantService(
     subscribe: (listener) => runtimeManager.subscribe(listener),
     getWorkflowRuns: () => runtimeManager.getWorkflowRuns(),
     getWorkflowRun: (id) => runtimeManager.getWorkflowRun(id),
-    async respondWorkflowApproval(
-      request: RespondWorkflowApprovalRequest
-    ): Promise<RespondWorkflowApprovalResponse> {
-      const normalized = normalizeWorkflowApprovalRequest(request)
-
-      if (normalized.error) {
-        return {
-          ok: false,
-          message: normalized.error
-        }
-      }
-
-      const run = runtimeManager.respondToWorkflowApproval(normalized)
-
-      if (!run) {
-        return {
-          ok: false,
-          message: 'Workflow run or step could not be found.'
-        }
-      }
-
-      return {
-        ok: true,
-        message: normalized.approved
-          ? 'Workflow action approved.'
-          : 'Workflow action declined.',
-        run
-      }
-    },
-    async cancelWorkflowRun(
-      request: CancelWorkflowRunRequest
-    ): Promise<CancelWorkflowRunResponse> {
-      const normalized = normalizeCancelWorkflowRequest(request)
-
-      if (normalized.error) {
-        return {
-          ok: false,
-          message: normalized.error
-        }
-      }
-
-      const run = runtimeManager.cancelWorkflowRun(normalized.runId)
-
-      if (!run) {
-        return {
-          ok: false,
-          message: 'Workflow run could not be found.'
-        }
-      }
-
-      return {
-        ok: true,
-        message: 'Workflow cancellation requested.',
-        run
-      }
-    },
-    async sendCommand(
-      request: AssistantCommandRequest
-    ): Promise<AssistantCommandResponse> {
-      const normalizedRequest = normalizeCommandRequest(request)
-      const provider = runtimeManager.getProviderInfo()
-      const startupWarnings = runtimeManager.getStartupWarnings()
-
-      if (normalizedRequest.error) {
-        return {
-          ok: false,
-          provider,
-          error: normalizedRequest.error,
-          actions: [],
-          warnings: startupWarnings
-        }
-      }
-
-      try {
-        const runtimeTurn = await runtimeManager.sendCommand(normalizedRequest.command)
-        const actions = await pendingActions.createActionsForRuntimeTurn(
-          runtimeTurn.actions
-        )
-
-        const latestWorkflowRun = runtimeTurn.workflowRun?.id
-          ? runtimeManager.getWorkflowRun(runtimeTurn.workflowRun.id) ?? runtimeTurn.workflowRun
-          : undefined
-
-        return {
-          ok: true,
-          provider: runtimeManager.getProviderInfo(),
-          reply: createAssistantMessage('assistant', runtimeTurn.reply),
-          actions,
-          warnings: [...runtimeManager.getStartupWarnings(), ...runtimeTurn.warnings],
-          workflowRun: latestWorkflowRun
-        }
-      } catch (error) {
-        return {
-          ok: false,
-          provider: runtimeManager.getProviderInfo(),
-          error: normalizeError(error),
-          actions: [],
-          warnings: runtimeManager.getStartupWarnings()
-        }
-      }
-    },
-    async executeAction(
-      request: AssistantActionExecutionRequest
-    ): Promise<AssistantActionExecutionResponse> {
-      const normalizedRequest = normalizeActionExecutionRequest(request)
-
-      if (normalizedRequest.error) {
-        return {
-          ok: false,
-          message: normalizedRequest.error,
-          confirmationRequired: false
-        }
-      }
-
-      return pendingActions.execute(normalizedRequest)
-    },
+    respondWorkflowApproval: (request) =>
+      workflowUseCase.respondWorkflowApproval(request),
+    cancelWorkflowRun: (request) => workflowUseCase.cancelWorkflowRun(request),
+    sendCommand: (request) => commandUseCase.sendCommand(request),
+    executeAction: (request) => actionUseCase.executeAction(request),
     async dispose(): Promise<void> {
       continuationCoordinator.dispose()
       pendingActions.clear()

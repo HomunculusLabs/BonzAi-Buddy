@@ -1,5 +1,7 @@
-import type { AssistantEvent } from '../shared/contracts'
+import type { AssistantEvent } from '../shared/contracts/assistant'
 import { mountAppDom } from './app-dom'
+import { createAppHydrationController } from './app-hydration-controller'
+import { createAppWindowControls } from './app-window-controls'
 import { createAssistantCommandController } from './assistant-command-controller'
 import { createAssistantEventController } from './assistant-event-controller'
 import {
@@ -175,6 +177,11 @@ export function renderApp(root: HTMLDivElement): void {
 
   let assistantEventController: ReturnType<typeof createAssistantEventController> | null = null
 
+  const windowControls = createAppWindowControls({
+    minimizeButton,
+    closeButton
+  })
+
   const loadVrm = async (): Promise<void> => {
     await vrmController.load(
       shellStateController.getShellState()?.vrmAssetPath,
@@ -204,22 +211,6 @@ export function renderApp(root: HTMLDivElement): void {
         conversationController.setAwaitingAssistant(false)
         return
     }
-  }
-
-  const handleMinimizeClick = (): void => {
-    if (!window.bonzi) {
-      return
-    }
-
-    window.bonzi.window.minimize()
-  }
-
-  const handleCloseClick = (): void => {
-    if (!window.bonzi) {
-      return
-    }
-
-    window.bonzi.window.close()
   }
 
   const handleStageDoubleClick = (event: MouseEvent): void => {
@@ -294,8 +285,6 @@ export function renderApp(root: HTMLDivElement): void {
     shellWindowInteractionController.syncDesktopMouseEventMode(event)
   }
 
-  minimizeButton.addEventListener('click', handleMinimizeClick)
-  closeButton.addEventListener('click', handleCloseClick)
   stageShellEl.addEventListener('dblclick', handleStageDoubleClick)
   chatLogEl.addEventListener('click', handleChatLogClick)
   window.addEventListener('keydown', handleWindowKeydown)
@@ -332,79 +321,36 @@ export function renderApp(root: HTMLDivElement): void {
     onAssistantEvent: handleAssistantEvent
   })
 
-  void (async () => {
-    const [shellStateResult, historyResult] = await Promise.allSettled([
-      window.bonzi.app.getShellState(),
-      window.bonzi.assistant.getHistory()
-    ])
-
-    if (shellStateResult.status === 'rejected') {
-      const message = `Failed to load shell state: ${String(shellStateResult.reason)}`
-      shellStateController.setAppReadyState('error')
-      shellStateEl.textContent = message
-      vrmPathEl.textContent = 'Unavailable'
-      vrmStatusEl.textContent = 'VRM failed to initialize'
-      vrmErrorEl.hidden = false
-      vrmErrorEl.textContent = message
-      vrmRetryButton.hidden = true
-      conversationController.appendSystemMessage(message)
+  createAppHydrationController({
+    shellStateEl,
+    vrmPathEl,
+    vrmStatusEl,
+    vrmErrorEl,
+    vrmRetryButton,
+    getShellState: () => window.bonzi!.app.getShellState(),
+    getAssistantHistory: () => window.bonzi!.assistant.getHistory(),
+    applyShellState: shellStateController.applyShellState,
+    hydrateConversation: conversationController.hydrateConversation,
+    appendSystemMessage: conversationController.appendSystemMessage,
+    getConversationEntryCount: conversationController.getEntryCount,
+    hydrateCharacterSettings: settingsPanelController.hydrateCharacterSettings,
+    hydrateKnowledgeSettings: settingsPanelController.hydrateKnowledgeSettings,
+    hydratePluginSettings: settingsPanelController.hydratePluginSettings,
+    setInputEnabled: commandController.setInputEnabled,
+    setAppReadyState: shellStateController.setAppReadyState,
+    syncBubbleWindowLayout: () => {
       hasVrmError = !vrmErrorEl.hidden
       syncBubbleWindowLayout()
-      return
-    }
-
-    shellStateController.applyShellState(shellStateResult.value)
-
-    if (historyResult.status === 'fulfilled') {
-      conversationController.hydrateConversation(historyResult.value)
-    } else {
-      conversationController.appendSystemMessage(
-        `Failed to load assistant history: ${String(historyResult.reason)}`
-      )
-    }
-
-    await Promise.all([
-      settingsPanelController.hydrateCharacterSettings(),
-      settingsPanelController.hydrateKnowledgeSettings(),
-      settingsPanelController.hydratePluginSettings({
-        preserveStatus: true,
-        fallbackToSavedSettings: false
-      })
-    ])
-
-    if (
-      conversationController.getEntryCount() === 0 &&
-      shellStateResult.value.assistant.warnings.length > 0
-    ) {
-      conversationController.appendSystemMessage(
-        shellStateResult.value.assistant.warnings.join(' ')
-      )
-    }
-
-    commandController.setInputEnabled(true)
-    shellStateController.setAppReadyState('ready')
-    void loadVrm()
-  })().catch((error: unknown) => {
-    const message = `Failed to hydrate Bonzi shell: ${String(error)}`
-    shellStateController.setAppReadyState('error')
-    shellStateEl.textContent = message
-    vrmPathEl.textContent = 'Unavailable'
-    vrmStatusEl.textContent = 'VRM failed to initialize'
-    vrmErrorEl.hidden = false
-    vrmErrorEl.textContent = message
-    vrmRetryButton.hidden = true
-    conversationController.appendSystemMessage(message)
-    hasVrmError = !vrmErrorEl.hidden
-    syncBubbleWindowLayout()
-  })
+    },
+    loadVrm
+  }).hydrate()
 
   window.addEventListener(
     'beforeunload',
     () => {
       assistantEventController?.dispose()
       assistantEventController = null
-      minimizeButton.removeEventListener('click', handleMinimizeClick)
-      closeButton.removeEventListener('click', handleCloseClick)
+      windowControls.dispose()
       stageShellEl.removeEventListener('dblclick', handleStageDoubleClick)
       chatLogEl.removeEventListener('click', handleChatLogClick)
       window.removeEventListener('keydown', handleWindowKeydown)
