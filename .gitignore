@@ -17,3 +17,6 @@ bun-debug-*.log*
 public/static/animations/*.fbx
 public/static/animations/*.vrma
 !public/static/animations/.gitkeep
+prompt-exports/
+docs/investigations/
+ORCHESTRATION_PLAN.md
