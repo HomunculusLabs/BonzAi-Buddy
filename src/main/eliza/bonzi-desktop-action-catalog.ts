@@ -104,7 +104,7 @@ export const BONZI_DESKTOP_ACTION_SPECS = [
     type: 'discord-read-context',
     title: 'Read Discord context',
     description:
-      'Default Discord reading action. Ask Bonzi to use a browser session for Discord Web and extract the current chat context from the DOM. This uses no screenshots or OCR, does not use the native Discord app, and does not send messages.',
+      'Default Discord reading action. Ask Bonzi to use its internal Discord Web browser session and extract the current chat context from the DOM. This uses no screenshots or OCR, does not use the native Discord app, and does not send messages.',
     requiresConfirmation: false,
     similes: ['READ_DISCORD', 'INSPECT_DISCORD', 'READ_DISCORD_CONTEXT', 'READ_DISCORD_WEB', 'DISCORD_CONTEXT', 'discord-read-context'],
     parameters: [
@@ -195,7 +195,7 @@ export const BONZI_DESKTOP_ACTION_SPECS = [
     type: 'discord-type-draft',
     title: 'Type Discord draft',
     description:
-      'Ask Bonzi to type a draft into the Discord Web browser composer using DOM insertion. Bonzi will not press Enter or send the message.',
+      'Ask Bonzi to type a draft into the Discord Web composer in its internal browser session using DOM insertion. Bonzi will not press Enter or send the message.',
     requiresConfirmation: false,
     similes: ['TYPE_DISCORD_DRAFT', 'PREPARE_DISCORD_REPLY', 'DRAFT_DISCORD_REPLY', 'discord-type-draft'],
     parameters: [

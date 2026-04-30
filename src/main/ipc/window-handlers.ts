@@ -68,6 +68,20 @@ export function registerWindowIpcHandlers(): void {
     BrowserWindow.fromWebContents(event.sender)?.close()
   })
 
+  onSend(IPC_CHANNELS.window.focus, (event) => {
+    const targetWindow = BrowserWindow.fromWebContents(event.sender)
+
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return
+    }
+
+    if (!targetWindow.isVisible()) {
+      targetWindow.show()
+    }
+
+    targetWindow.focus()
+  })
+
   handleInvoke(IPC_CHANNELS.window.getBounds, (event) => {
     return BrowserWindow.fromWebContents(event.sender)?.getBounds() ?? null
   })

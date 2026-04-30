@@ -24,15 +24,21 @@ export interface FakePluginRegistry {
 
 export interface FakeDiscordDomServer {
   url: string
+  urlForPath: (path: string) => string
   close: () => Promise<void>
 }
 
 export async function startFakeDiscordDomServer(): Promise<FakeDiscordDomServer> {
   const server = createServer((request, response) => {
-    if (
-      request.method === 'GET' &&
-      request.url?.startsWith('/channels/test/server/channel')
-    ) {
+    if (request.method !== 'GET') {
+      response.statusCode = 404
+      response.end('Not found')
+      return
+    }
+
+    const requestUrl = request.url ?? '/'
+
+    if (requestUrl.startsWith('/channels/test/server/channel')) {
       response.statusCode = 200
       response.setHeader('Content-Type', 'text/html; charset=utf-8')
       response.end(`<!doctype html>
@@ -60,6 +66,120 @@ export async function startFakeDiscordDomServer(): Promise<FakeDiscordDomServer>
       return
     }
 
+    if (requestUrl.startsWith('/channels/test/server/empty')) {
+      response.statusCode = 200
+      response.setHeader('Content-Type', 'text/html; charset=utf-8')
+      response.end(`<!doctype html>
+<html>
+  <head><title>Fake Discord Empty Channel</title></head>
+  <body>
+    <main>
+      <h1>#empty</h1>
+      <section data-list-id="chat-messages" aria-label="Messages in empty"></section>
+      <div role="textbox" contenteditable="true" aria-label="Message #empty"></div>
+    </main>
+  </body>
+</html>`)
+      return
+    }
+
+    if (requestUrl.startsWith('/channels/test/server/selector-drift')) {
+      response.statusCode = 200
+      response.setHeader('Content-Type', 'text/html; charset=utf-8')
+      response.end(`<!doctype html>
+<html>
+  <head><title>Fake Discord Selector Drift</title></head>
+  <body>
+    <main>
+      <h1>#selector-drift</h1>
+      <section data-custom-list="unrecognized-list">
+        <div data-custom-item="1">No supported Discord selectors here.</div>
+      </section>
+      <div role="textbox" contenteditable="true" aria-label="Message #selector-drift"></div>
+    </main>
+  </body>
+</html>`)
+      return
+    }
+
+    if (requestUrl.startsWith('/channels/test/server/no-composer')) {
+      response.statusCode = 200
+      response.setHeader('Content-Type', 'text/html; charset=utf-8')
+      response.end(`<!doctype html>
+<html>
+  <head><title>Fake Discord No Composer</title></head>
+  <body>
+    <main>
+      <h1>#no-composer</h1>
+      <section data-list-id="chat-messages" aria-label="Messages in no-composer">
+        <article role="article" id="chat-messages-3">
+          <h3><span id="message-username-3">Charlie</span></h3>
+          <div id="message-content-3">Messages exist but no composer.</div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>`)
+      return
+    }
+
+    if (requestUrl.startsWith('/channels/test/server/existing-composer')) {
+      response.statusCode = 200
+      response.setHeader('Content-Type', 'text/html; charset=utf-8')
+      response.end(`<!doctype html>
+<html>
+  <head><title>Fake Discord Existing Composer</title></head>
+  <body>
+    <main>
+      <h1>#existing-composer</h1>
+      <section data-list-id="chat-messages" aria-label="Messages in existing-composer">
+        <article role="article" id="chat-messages-4">
+          <h3><span id="message-username-4">Dana</span></h3>
+          <div id="message-content-4">Draft should not overwrite existing text.</div>
+        </article>
+      </section>
+      <div role="textbox" contenteditable="true" aria-label="Message #existing-composer">Already typing here</div>
+    </main>
+  </body>
+</html>`)
+      return
+    }
+
+    if (requestUrl.startsWith('/login')) {
+      response.statusCode = 200
+      response.setHeader('Content-Type', 'text/html; charset=utf-8')
+      response.end(`<!doctype html>
+<html>
+  <head><title>Discord Login</title></head>
+  <body>
+    <main>
+      <h1>Welcome back!</h1>
+      <form>
+        <label>Email <input type="email" name="email" /></label>
+        <label>Password <input type="password" name="password" /></label>
+      </form>
+    </main>
+  </body>
+</html>`)
+      return
+    }
+
+    if (requestUrl.startsWith('/channels/@me')) {
+      response.statusCode = 200
+      response.setHeader('Content-Type', 'text/html; charset=utf-8')
+      response.end(`<!doctype html>
+<html>
+  <head><title>Discord Home</title></head>
+  <body>
+    <main>
+      <h1>Direct Messages</h1>
+      <p>Select a conversation.</p>
+    </main>
+  </body>
+</html>`)
+      return
+    }
+
     response.statusCode = 404
     response.end('Not found')
   })
@@ -72,8 +192,11 @@ export async function startFakeDiscordDomServer(): Promise<FakeDiscordDomServer>
     throw new Error('Failed to bind fake Discord DOM server.')
   }
 
+  const baseUrl = `http://127.0.0.1:${address.port}`
+
   return {
-    url: `http://127.0.0.1:${address.port}/channels/test/server/channel`,
+    url: `${baseUrl}/channels/test/server/channel`,
+    urlForPath: (path: string) => `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`,
     close: () => closeServer(server)
   }
 }

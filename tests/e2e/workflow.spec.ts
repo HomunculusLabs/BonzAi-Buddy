@@ -5,31 +5,66 @@ import { launchBonziApp } from './fixtures/app'
 import { startFakeDiscordDomServer } from './fixtures/fake-servers'
 import { readJsonFile } from './fixtures/json'
 
-test('reads Discord Web DOM context and persists the action observation', async () => {
-  const discord = await startFakeDiscordDomServer()
+async function runDiscordContextAction(url: string) {
   const session = await launchBonziApp({
     userDataDirPrefix: 'bonzi-e2e-discord-context-',
     env: {
-      BONZI_E2E_DISCORD_URL: discord.url,
+      BONZI_E2E_DISCORD_URL: url,
       BONZI_DISCORD_BROWSER_SHOW_FOR_LOGIN: '0'
     }
   })
 
+  const { window } = session
+  await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+
+  const response = await window.evaluate(() =>
+    window.bonzi.assistant.sendCommand({ command: 'discord context e2e' })
+  )
+  expect(response.actions).toHaveLength(1)
+  expect(response.actions[0]?.type).toBe('discord-read-context')
+
+  const execution = await window.evaluate(
+    (actionId) => window.bonzi.assistant.executeAction({ actionId, confirmed: false }),
+    response.actions[0]!.id
+  )
+
+  return { session, window, execution }
+}
+
+async function runDiscordDraftAction(url: string) {
+  const session = await launchBonziApp({
+    userDataDirPrefix: 'bonzi-e2e-discord-draft-',
+    env: {
+      BONZI_E2E_DISCORD_URL: url,
+      BONZI_DISCORD_BROWSER_SHOW_FOR_LOGIN: '0'
+    }
+  })
+
+  const { window } = session
+  await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+
+  const response = await window.evaluate(() =>
+    window.bonzi.assistant.sendCommand({ command: 'discord draft e2e' })
+  )
+  expect(response.actions).toHaveLength(1)
+  expect(response.actions[0]?.type).toBe('discord-type-draft')
+
+  const execution = await window.evaluate(
+    (actionId) => window.bonzi.assistant.executeAction({ actionId, confirmed: false }),
+    response.actions[0]!.id
+  )
+
+  return { session, execution }
+}
+
+test('reads Discord Web DOM context and persists the action observation', async () => {
+  const discord = await startFakeDiscordDomServer()
+  let session: { close: () => Promise<void> } | null = null
+
   try {
-    const { window } = session
-    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
-
-    const response = await window.evaluate(() =>
-      window.bonzi.assistant.sendCommand({ command: 'discord context e2e' })
-    )
-    expect(response.actions).toHaveLength(1)
-    expect(response.actions[0]?.type).toBe('discord-read-context')
-
-    const execution = await window.evaluate(
-      (actionId) =>
-        window.bonzi.assistant.executeAction({ actionId, confirmed: false }),
-      response.actions[0]!.id
-    )
+    const run = await runDiscordContextAction(discord.url)
+    session = run.session
+    const { window, execution } = run
     expect(execution.ok).toBe(true)
     expect(execution.message).toContain('Discord Web DOM context')
     expect(execution.message).toContain('Alice: Can Bonzi read this channel?')
@@ -43,42 +78,163 @@ test('reads Discord Web DOM context and persists the action observation', async 
     )
     expect(serializedHistory).toContain('Alice: Can Bonzi read this channel?')
   } finally {
-    await session.close()
+    if (session) {
+      await session.close()
+    }
     await discord.close()
   }
 })
 
 test('types a Discord Web draft without sending it', async () => {
   const discord = await startFakeDiscordDomServer()
-  const session = await launchBonziApp({
-    userDataDirPrefix: 'bonzi-e2e-discord-draft-',
-    env: {
-      BONZI_E2E_DISCORD_URL: discord.url,
-      BONZI_DISCORD_BROWSER_SHOW_FOR_LOGIN: '0'
-    }
-  })
+  let session: { close: () => Promise<void> } | null = null
 
   try {
-    const { window } = session
-    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
-
-    const response = await window.evaluate(() =>
-      window.bonzi.assistant.sendCommand({ command: 'discord draft e2e' })
-    )
-    expect(response.actions).toHaveLength(1)
-    expect(response.actions[0]?.type).toBe('discord-type-draft')
-
-    const execution = await window.evaluate(
-      (actionId) =>
-        window.bonzi.assistant.executeAction({ actionId, confirmed: false }),
-      response.actions[0]!.id
-    )
+    const run = await runDiscordDraftAction(discord.url)
+    session = run.session
+    const { execution } = run
     expect(execution.ok).toBe(true)
     expect(execution.message).toContain('Typed a Discord Web draft')
     expect(execution.message).toContain('did not press Enter')
     expect(execution.message).toContain('did not send')
   } finally {
-    await session.close()
+    if (session) {
+      await session.close()
+    }
+    await discord.close()
+  }
+})
+
+test('reports login-required context state on Discord login page', async () => {
+  const discord = await startFakeDiscordDomServer()
+  let session: { close: () => Promise<void> } | null = null
+
+  try {
+    const run = await runDiscordContextAction(discord.urlForPath('/login'))
+    session = run.session
+    const { execution } = run
+    expect(execution.ok).toBe(true)
+    expect(execution.message).toContain('Login required in Bonzi\'s Discord Web browser session.')
+    expect(execution.message).toContain('Readiness: login_required')
+    expect(execution.message).toContain('Diagnostics:')
+  } finally {
+    if (session) {
+      await session.close()
+    }
+    await discord.close()
+  }
+})
+
+test('reports wrong-page context state for non-channel Discord pages', async () => {
+  const discord = await startFakeDiscordDomServer()
+  let session: { close: () => Promise<void> } | null = null
+
+  try {
+    const run = await runDiscordContextAction(discord.urlForPath('/channels/@me'))
+    session = run.session
+    const { execution } = run
+    expect(execution.ok).toBe(true)
+    expect(execution.message).toContain(
+      'Discord Web is open, but not on a specific channel or DM.'
+    )
+    expect(execution.message).toContain('Readiness: wrong_page')
+  } finally {
+    if (session) {
+      await session.close()
+    }
+    await discord.close()
+  }
+})
+
+test('reports empty-messages context state for empty channels', async () => {
+  const discord = await startFakeDiscordDomServer()
+  let session: { close: () => Promise<void> } | null = null
+
+  try {
+    const run = await runDiscordContextAction(
+      discord.urlForPath('/channels/test/server/empty')
+    )
+    session = run.session
+    const { execution } = run
+    expect(execution.ok).toBe(true)
+    expect(execution.message).toContain('No visible chat messages were found in this channel.')
+    expect(execution.message).toContain('Readiness: empty_messages')
+    expect(execution.message).toContain('No messages were read or sent.')
+  } finally {
+    if (session) {
+      await session.close()
+    }
+    await discord.close()
+  }
+})
+
+test('reports selector-drift context state when supported message selectors fail', async () => {
+  const discord = await startFakeDiscordDomServer()
+  let session: { close: () => Promise<void> } | null = null
+
+  try {
+    const run = await runDiscordContextAction(
+      discord.urlForPath('/channels/test/server/selector-drift')
+    )
+    session = run.session
+    const { execution } = run
+    expect(execution.ok).toBe(true)
+    expect(execution.message).toContain(
+      'DOM selectors did not find the message list'
+    )
+    expect(execution.message).toContain('Readiness: selector_drift')
+    expect(execution.message).toContain('messageSelectors=none')
+  } finally {
+    if (session) {
+      await session.close()
+    }
+    await discord.close()
+  }
+})
+
+test('reports missing composer for draft typing when composer is unavailable', async () => {
+  const discord = await startFakeDiscordDomServer()
+  let session: { close: () => Promise<void> } | null = null
+
+  try {
+    const run = await runDiscordDraftAction(
+      discord.urlForPath('/channels/test/server/no-composer')
+    )
+    session = run.session
+    const { execution } = run
+    expect(execution.ok).toBe(true)
+    expect(execution.message).toContain(
+      'Discord channel loaded, but Bonzi could not find the message composer.'
+    )
+    expect(execution.message).toContain('No Discord message was sent.')
+    expect(execution.message).toContain('composer=false')
+  } finally {
+    if (session) {
+      await session.close()
+    }
+    await discord.close()
+  }
+})
+
+test('does not overwrite existing composer text when typing a draft', async () => {
+  const discord = await startFakeDiscordDomServer()
+  let session: { close: () => Promise<void> } | null = null
+
+  try {
+    const run = await runDiscordDraftAction(
+      discord.urlForPath('/channels/test/server/existing-composer')
+    )
+    session = run.session
+    const { execution } = run
+    expect(execution.ok).toBe(true)
+    expect(execution.message).toContain(
+      'Discord composer already contains text, so Bonzi did not overwrite it.'
+    )
+    expect(execution.message).toContain('Existing composer text: Already typing here')
+  } finally {
+    if (session) {
+      await session.close()
+    }
     await discord.close()
   }
 })

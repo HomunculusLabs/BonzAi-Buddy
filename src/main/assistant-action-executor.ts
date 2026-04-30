@@ -93,6 +93,9 @@ export async function executeAssistantAction(
       return 'Bonzi companion window closed.'
     case 'open-url': {
       const url = resolveSafeHttpUrl(action.params?.url)
+      if (isDiscordWebUrl(url)) {
+        return deps.discordBrowserService.open({ url: url.toString() })
+      }
       await shell.openExternal(url.toString())
       return `Opened ${url.toString()} in your default browser.`
     }
@@ -203,6 +206,11 @@ function resolveSafeHttpUrl(rawUrl: unknown): URL {
   }
 
   return url
+}
+
+function isDiscordWebUrl(url: URL): boolean {
+  return url.protocol === 'https:'
+    && (url.hostname === 'discord.com' || url.hostname === 'discordapp.com')
 }
 
 function createSafeSearchTarget(rawQuery: unknown): { query: string; url: URL } {

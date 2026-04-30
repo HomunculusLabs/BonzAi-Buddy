@@ -27,6 +27,7 @@ export const IPC_CHANNELS = {
     getBounds: 'window:get-bounds',
     minimize: 'window:minimize',
     close: 'window:close',
+    focus: 'window:focus',
     setPosition: 'window:set-position',
     setBounds: 'window:set-bounds',
     setMouseEventsIgnored: 'window:set-mouse-events-ignored'

@@ -95,7 +95,7 @@ function actionDescription(
   if (spec.type === 'discord-read-context') {
     const target = params?.url ? ` at ${params.url}` : ''
     const query = params?.query ? ` with query: “${params.query}”` : ''
-    return `Read Discord Web DOM context${target}${query}. This uses no screenshots or OCR and does not send messages.`
+    return `Read Discord Web DOM context${target}${query} in Bonzi's internal browser session. This uses no screenshots or OCR and does not send messages.`
   }
 
   if (spec.type === 'discord-read-screenshot' && params?.query) {
@@ -108,7 +108,7 @@ function actionDescription(
 
   if (spec.type === 'discord-type-draft' && params?.text) {
     const target = params.url ? ` in ${params.url}` : ''
-    return `Type this Discord Web draft${target} without pressing Enter or sending it: “${truncate(params.text, 160)}”`
+    return `Type this Discord Web draft${target} in Bonzi's internal browser session without pressing Enter or sending it: “${truncate(params.text, 160)}”`
   }
 
   if (spec.type === 'workspace-list-files') {

@@ -64,7 +64,7 @@ const ACTION_DEFAULTS: Record<
     type: 'discord-read-context',
     title: 'Read Discord context',
     description:
-      'Use Discord Web in a browser session and extract the visible chat context from the DOM. This uses no screenshots or OCR and does not send messages.',
+      'Use Bonzi\'s internal Discord Web browser session and extract the visible chat context from the DOM. This uses no screenshots or OCR and does not send messages.',
     requiresConfirmation: false
   },
   'discord-read-screenshot': {
@@ -85,7 +85,7 @@ const ACTION_DEFAULTS: Record<
     type: 'discord-type-draft',
     title: 'Type Discord draft',
     description:
-      'Use Discord Web in a browser session to type a draft into the composer. This will not press Enter or send the message.',
+      'Use Bonzi\'s internal Discord Web browser session to type a draft into the composer. This will not press Enter or send the message.',
     requiresConfirmation: false
   },
   'workspace-list-files': {

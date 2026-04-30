@@ -95,6 +95,7 @@ const bonziApi = {
     getBounds: () => invoke(IPC_CHANNELS.window.getBounds),
     minimize: () => send(IPC_CHANNELS.window.minimize),
     close: () => send(IPC_CHANNELS.window.close),
+    focus: () => send(IPC_CHANNELS.window.focus),
     setPosition: (x, y) => {
       if (!isFiniteNumber(x) || !isFiniteNumber(y)) {
         return

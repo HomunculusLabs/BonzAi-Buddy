@@ -25,9 +25,17 @@ export function createAssistantCommandController(
     shellStateController
   } = options
 
+  let commandRequestsInFlight = 0
+  let appInputEnabled = true
+
   const setInputEnabled = (enabled: boolean): void => {
+    appInputEnabled = enabled
     chatInputEl.disabled = !enabled
     assistantSendButton.disabled = !enabled
+  }
+
+  const syncAwaitingAssistant = (): void => {
+    conversationController.setAwaitingAssistant(commandRequestsInFlight > 0)
   }
 
   const handleSubmit = async (event: SubmitEvent): Promise<void> => {
@@ -44,10 +52,15 @@ export function createAssistantCommandController(
     }
 
     conversationController.addUserMessage(command)
-    conversationController.setAwaitingAssistant(true)
+    commandRequestsInFlight += 1
+    syncAwaitingAssistant()
 
     chatInputEl.value = ''
-    setInputEnabled(false)
+    if (appInputEnabled) {
+      window.requestAnimationFrame(() => {
+        chatInputEl.focus()
+      })
+    }
 
     try {
       const response = await window.bonzi.assistant.sendCommand({ command })
@@ -63,18 +76,17 @@ export function createAssistantCommandController(
         )
       }
 
-      conversationController.setAwaitingAssistant(false)
       conversationController.setUiVisible(false)
     } catch (error) {
-      conversationController.setAwaitingAssistant(false)
       conversationController.appendSystemMessage(
         `Assistant request failed: ${String(error)}`
       )
     } finally {
-      conversationController.setAwaitingAssistant(false)
-      setInputEnabled(true)
+      commandRequestsInFlight = Math.max(0, commandRequestsInFlight - 1)
+      syncAwaitingAssistant()
+      setInputEnabled(appInputEnabled)
 
-      if (conversationController.isUiVisible()) {
+      if (conversationController.isUiVisible() && appInputEnabled) {
         chatInputEl.focus()
       }
     }

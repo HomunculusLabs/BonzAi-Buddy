@@ -166,6 +166,17 @@ export function renderApp(root: HTMLDivElement): void {
     shellStateController
   })
 
+  const restoreChatInputIfVisible = (): void => {
+    commandController.setInputEnabled(true)
+
+    if (conversationController.isUiVisible()) {
+      window.bonzi?.window.focus()
+      window.requestAnimationFrame(() => {
+        chatInputEl.focus()
+      })
+    }
+  }
+
   const windowDragController = createWindowDragController({
     canStartDrag: shellWindowInteractionController.canInteractWithStageFromEvent,
     onDragStateChange: (dragging) => {
@@ -201,14 +212,23 @@ export function renderApp(root: HTMLDivElement): void {
         if (conversationController.applyWorkflowRunUpdate(event.run)) {
           conversationController.render()
         }
+        if (isTerminalWorkflowStatus(event.run.status)) {
+          conversationController.setAwaitingAssistant(false)
+          restoreChatInputIfVisible()
+        }
         return
       case 'assistant-action-updated':
         conversationController.applyActionUpdate(event.action)
         conversationController.render()
+        if (isTerminalAssistantActionStatus(event.action.status)) {
+          conversationController.setAwaitingAssistant(false)
+          restoreChatInputIfVisible()
+        }
         return
       case 'assistant-turn-created':
         conversationController.addAssistantTurn(event.turn)
         conversationController.setAwaitingAssistant(false)
+        restoreChatInputIfVisible()
         return
     }
   }
@@ -369,6 +389,17 @@ export function renderApp(root: HTMLDivElement): void {
   )
 
   syncBubbleWindowLayout()
+}
+
+function isTerminalWorkflowStatus(status: string): boolean {
+  return status === 'completed'
+    || status === 'failed'
+    || status === 'cancelled'
+    || status === 'interrupted'
+}
+
+function isTerminalAssistantActionStatus(status: string): boolean {
+  return status === 'completed' || status === 'failed'
 }
 
 function normalizeBuddyKind(value: string | null | undefined): BuddyKind {

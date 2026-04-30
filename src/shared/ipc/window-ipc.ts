@@ -21,6 +21,9 @@ export type WindowIpcSendChannelMap = {
   [IPC_CHANNELS.window.close]: {
     args: []
   }
+  [IPC_CHANNELS.window.focus]: {
+    args: []
+  }
   [IPC_CHANNELS.window.setPosition]: {
     args: [x: number, y: number]
   }
@@ -37,6 +40,7 @@ export interface WindowBridge {
     getBounds: () => Promise<WindowBounds | null>
     minimize: () => void
     close: () => void
+    focus: () => void
     setPosition: (x: number, y: number) => void
     setBounds: (bounds: WindowBounds) => void
     setMouseEventsIgnored: (ignored: boolean) => void
