@@ -61,6 +61,14 @@ function actionTitle(
     return `Scroll Discord ${params.direction}`
   }
 
+  if (spec.type === 'hermes-run' && params?.prompt) {
+    return 'Consult Hermes'
+  }
+
+  if (spec.type === 'inspect-cron-jobs') {
+    return 'Inspect Hermes cron jobs'
+  }
+
   if (spec.type === 'discord-type-draft' && params?.text) {
     return 'Type Discord draft'
   }
@@ -90,6 +98,18 @@ function actionDescription(
 
   if (spec.type === 'discord-snapshot' && params?.query) {
     return `Inspect the native Discord app with Cua Driver query: “${params.query}”. This does not send messages.`
+  }
+
+  if (spec.type === 'hermes-run') {
+    return params?.prompt
+      ? `Consult Hermes as a secondary specialist with prompt: “${truncate(params.prompt, 180)}”. Hermes returns observation text only; Eliza remains the orchestrator.`
+      : 'Consult Hermes as a secondary specialist. Hermes returns observation text only; Eliza remains the orchestrator.'
+  }
+
+  if (spec.type === 'inspect-cron-jobs') {
+    return params?.query
+      ? `Inspect Hermes cron jobs matching “${truncate(params.query, 120)}”. This is read-only; Eliza decides any follow-up.`
+      : 'Inspect Hermes cron jobs. This is read-only; Eliza decides any follow-up.'
   }
 
   if (spec.type === 'discord-read-context') {

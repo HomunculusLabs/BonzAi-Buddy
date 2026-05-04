@@ -1,6 +1,6 @@
 import { constants as fsConstants } from 'node:fs'
 import { lstat, open } from 'node:fs/promises'
-import type { Memory, UUID } from '@elizaos/core/node'
+import { ChannelType, stringToUuid, type Memory, type UUID } from '@elizaos/core/node'
 import type {
   CancelKnowledgeImportRequest,
   CancelKnowledgeImportResult,
@@ -56,8 +56,9 @@ interface KnowledgeImportJob {
 }
 
 const KNOWLEDGE_IMPORT_SOURCE = 'bonzi-settings-knowledge-import'
-const KNOWLEDGE_IMPORT_DOCUMENT_YIELD_INTERVAL = 5
+const KNOWLEDGE_IMPORT_DOCUMENT_YIELD_INTERVAL = 1
 const KNOWLEDGE_IMPORT_CHUNK_YIELD_INTERVAL = 10
+const KNOWLEDGE_IMPORT_CHUNK_CONCURRENCY = 2
 
 export class BonziKnowledgeImportCoordinator {
   private readonly getRuntime: () => Promise<RuntimeBundle>
@@ -617,6 +618,7 @@ export class BonziKnowledgeImportCoordinator {
         importId,
         document: prepared.document,
         importedAt,
+        skipDuplicateLookup: true,
         signal
       })
 
@@ -643,33 +645,46 @@ export class BonziKnowledgeImportCoordinator {
     importId: string
     document: PreparedKnowledgeDocument
     importedAt: string
+    skipDuplicateLookup?: boolean
     signal?: AbortSignal
   }): Promise<KnowledgeImportDocumentResult> {
-    const { bundle, importId, document, importedAt, signal } = options
+    const {
+      bundle,
+      importId,
+      document,
+      importedAt,
+      skipDuplicateLookup = false,
+      signal
+    } = options
     let chunksImported = 0
     let chunksSkipped = 0
 
     try {
-      for (const [index, chunk] of document.chunks.entries()) {
-        throwIfAborted(signal)
-        const imported = await this.importKnowledgeChunk({
-          bundle,
-          importId,
-          document,
-          chunk,
-          importedAt
-        })
+      await runWithConcurrency(
+        document.chunks,
+        KNOWLEDGE_IMPORT_CHUNK_CONCURRENCY,
+        async (chunk, index) => {
+          throwIfAborted(signal)
+          const imported = await this.importKnowledgeChunk({
+            bundle,
+            importId,
+            document,
+            chunk,
+            importedAt,
+            skipDuplicateLookup
+          })
 
-        if (imported) {
-          chunksImported += 1
-        } else {
-          chunksSkipped += 1
-        }
+          if (imported) {
+            chunksImported += 1
+          } else {
+            chunksSkipped += 1
+          }
 
-        if ((index + 1) % KNOWLEDGE_IMPORT_CHUNK_YIELD_INTERVAL === 0) {
-          await yieldToEventLoop()
+          if ((index + 1) % KNOWLEDGE_IMPORT_CHUNK_YIELD_INTERVAL === 0) {
+            await yieldToEventLoop()
+          }
         }
-      }
+      )
     } catch (error) {
       if (isAbortError(error)) {
         throw error
@@ -714,13 +729,20 @@ export class BonziKnowledgeImportCoordinator {
     document: PreparedKnowledgeDocument
     chunk: KnowledgeImportChunk
     importedAt: string
+    skipDuplicateLookup?: boolean
   }): Promise<boolean> {
-    const { bundle, importId, document, chunk, importedAt } = options
-    const { ChannelType, stringToUuid } = await import('@elizaos/core/node')
+    const {
+      bundle,
+      importId,
+      document,
+      chunk,
+      importedAt,
+      skipDuplicateLookup = false
+    } = options
     const memoryId = stringToUuid(
       `bonzi-knowledge:${chunk.documentHash}:${chunk.chunkIndex}`
     ) as UUID
-    const existing = await bundle.runtime.getMemoryById(memoryId)
+    const existing = skipDuplicateLookup ? null : await bundle.runtime.getMemoryById(memoryId)
 
     if (existing) {
       return false
@@ -774,13 +796,7 @@ export class BonziKnowledgeImportCoordinator {
         return await runtime.countMemories(bundle.roomId, false, 'knowledge')
       }
 
-      const memories = await runtime.getMemories({
-        roomId: bundle.roomId,
-        tableName: 'knowledge',
-        count: 100_000,
-        unique: false
-      })
-      return memories.length
+      return null
     } catch {
       return null
     }
@@ -868,4 +884,23 @@ function isAbortError(error: unknown): boolean {
 
 function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<void>
+): Promise<void> {
+  const workerCount = Math.max(1, Math.min(concurrency, items.length))
+  let nextIndex = 0
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex
+        nextIndex += 1
+        await worker(items[index], index)
+      }
+    })
+  )
 }

@@ -142,6 +142,41 @@ export function createBellDetails(spokeMaterial: THREE.LineBasicMaterial): { roo
   return { root }
 }
 
+
+export function createUndersideFoldGeometry(index: number): THREE.BufferGeometry {
+  const segmentCount = 10
+  const positions: number[] = []
+  const indices: number[] = []
+  const foldPhase = index * 1.37
+  const length = 0.18 + (index % 3) * 0.035
+  const baseWidth = 0.07 + (index % 2) * 0.018
+  const tipWidth = 0.018 + (index % 3) * 0.004
+
+  for (let segment = 0; segment <= segmentCount; segment += 1) {
+    const t = segment / segmentCount
+    const width = THREE.MathUtils.lerp(baseWidth, tipWidth, Math.pow(t, 0.82))
+    const curl = Math.sin(t * Math.PI * 1.15 + foldPhase) * 0.025 * Math.sin(t * Math.PI)
+    const y = -0.035 - length * t + Math.sin(t * Math.PI + foldPhase) * 0.012
+    const z = curl
+
+    positions.push(-width, y, z, width, y, z)
+  }
+
+  for (let segment = 0; segment < segmentCount; segment += 1) {
+    const leftA = segment * 2
+    const rightA = leftA + 1
+    const leftB = leftA + 2
+    const rightB = leftA + 3
+    indices.push(leftA, leftB, rightA, rightA, leftB, rightB)
+  }
+
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+  geometry.setIndex(indices)
+  geometry.computeVertexNormals()
+  return geometry
+}
+
 export function clusteredTentacleAngle(
   index: number,
   total: number,

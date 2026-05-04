@@ -100,6 +100,45 @@ export const BONZI_DESKTOP_ACTION_SPECS = [
     similes: ['CHECK_CUA_STATUS', 'CUA_STATUS', 'CHECK_COMPUTER_USE_DRIVER', 'cua-check-status']
   },
   {
+    elizaName: 'HERMES_RUN',
+    type: 'hermes-run',
+    title: 'Consult Hermes secondary runtime',
+    description:
+      'Ask Bonzi to consult Hermes as a secondary specialist. Hermes returns advisory observation text only; Eliza remains the orchestrator and decides any user-facing response or follow-up Bonzi action.',
+    requiresConfirmation: false,
+    similes: ['CONSULT_HERMES', 'ASK_HERMES', 'HERMES_CONSULT', 'HERMES_RUN', 'hermes-run'],
+    parameters: [
+      {
+        name: 'prompt',
+        description:
+          'The bounded consultation prompt for Hermes. Include only context Hermes needs to provide advisory observations back to Eliza.',
+        required: true,
+        schema: { type: 'string' },
+        examples: ['Review this plan and point out risks.']
+      }
+    ],
+    missingParameterMessage: 'I need a prompt before I can prepare a Hermes consultation action.'
+  },
+  {
+    elizaName: 'INSPECT_CRON_JOBS',
+    type: 'inspect-cron-jobs',
+    title: 'Inspect Hermes cron jobs',
+    description:
+      'Ask Bonzi to inspect Hermes scheduled cron jobs through the secondary Hermes runtime and return an observation. This is read-only, and Eliza decides any follow-up action.',
+    requiresConfirmation: false,
+    similes: ['CHECK_CRON_JOBS', 'LIST_CRON_JOBS', 'CHECK_HERMES_CRON', 'HERMES_CRON_STATUS', 'inspect-cron-jobs'],
+    parameters: [
+      {
+        name: 'query',
+        description:
+          'Optional short filter for Hermes cron output, such as a project, job name, or topic.',
+        required: false,
+        schema: { type: 'string' },
+        examples: ['llm wiki', 'daily']
+      }
+    ]
+  },
+  {
     elizaName: 'DISCORD_READ_CONTEXT',
     type: 'discord-read-context',
     title: 'Read Discord context',
@@ -287,7 +326,10 @@ export const BONZI_DESKTOP_ACTION_SPECS = [
 ] as const satisfies readonly BonziDesktopActionSpec[]
 
 export const ACTION_TYPE_BY_ELIZA_NAME = new Map<string, AssistantActionType>(
-  BONZI_DESKTOP_ACTION_SPECS.map((spec) => [spec.elizaName, spec.type])
+  BONZI_DESKTOP_ACTION_SPECS.flatMap((spec) => [
+    [spec.elizaName, spec.type] as const,
+    ...spec.similes.map((simile) => [simile.trim().toUpperCase(), spec.type] as const)
+  ])
 )
 
 export const ACTION_SPEC_BY_TYPE = new Map<AssistantActionType, BonziDesktopActionSpec>(

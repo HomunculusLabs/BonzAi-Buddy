@@ -1,5 +1,5 @@
 import { app, type BrowserWindow } from 'electron'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import {
   type AssistantAction,
   type AssistantActionType,
@@ -7,6 +7,7 @@ import {
   type AssistantMessage,
   type AssistantTurnEventPayload,
   type AssistantProviderInfo,
+  type AssistantProviderSettings,
   type AssistantRuntimeStatus,
   type BonziWorkflowRunSnapshot,
   type ElizaCharacterSettings,
@@ -19,19 +20,26 @@ import {
   type CancelKnowledgeImportResult,
   type ImportKnowledgeDocumentsRequest,
   type ImportKnowledgeFoldersRequest,
+  type ListPiAiModelOptionsRequest,
+  type ListPiAiModelOptionsResult,
   type KnowledgeImportResult,
   type KnowledgeImportStatus,
   type RuntimeApprovalSettings,
+  type RuntimeRoutingSettingsResponse,
   type StartKnowledgeImportResult,
   type ShellState,
+  type UpdateAssistantProviderSettingsRequest,
   type UpdateElizaCharacterSettingsRequest,
   type UpdateElizaPluginSettingsRequest,
-  type UpdateRuntimeApprovalSettingsRequest
+  type UpdateRuntimeApprovalSettingsRequest,
+  type UpdateRuntimeRoutingSettingsRequest
 } from '../../shared/contracts'
 import { executeWorkflowBonziDesktopAction } from '../assistant-action-executor'
 import type { BonziWorkspaceFileService } from '../bonzi-workspace-file-service'
 import type { DiscordBrowserActionService } from '../discord-browser-service'
-import { normalizeError } from '../../shared/value-utils'
+import type { HermesSecondaryRuntimeService } from '../hermes/hermes-secondary-runtime-service'
+import { normalizeError, normalizeOptionalString } from '../../shared/value-utils'
+import { loadBonziElizaConfig } from './config'
 import { BonziPluginDiscoveryService } from './plugin-discovery'
 import { BonziPluginInstallationService } from './plugin-installer'
 import { BonziPluginRuntimeResolver } from './plugin-runtime-resolver'
@@ -59,16 +67,54 @@ interface BonziRuntimeManagerOptions {
   getCompanionWindow?: () => BrowserWindow | null
   discordBrowserService: DiscordBrowserActionService
   workspaceFileService: BonziWorkspaceFileService
+  hermesService?: Pick<HermesSecondaryRuntimeService, 'runConsultation' | 'inspectCronJobs'>
   dataDir?: string
   workflowRunsPath?: string
+}
+
+
+function getPiAgentDirCandidates(value: string | undefined): Array<string | undefined> {
+  const candidates: Array<string | undefined> = []
+  const explicit = expandHomePath(normalizeOptionalString(value))
+
+  if (explicit) {
+    candidates.push(explicit)
+  }
+
+  candidates.push(undefined)
+  candidates.push(join(app.getPath('home'), '.pi', 'agent'))
+
+  return candidates.filter((candidate, index, all) => all.indexOf(candidate) === index)
+}
+
+function expandHomePath(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined
+  }
+
+  if (value === '~') {
+    return app.getPath('home')
+  }
+
+  if (value.startsWith('~/')) {
+    return join(app.getPath('home'), value.slice(2))
+  }
+
+  if (isAbsolute(value)) {
+    return value
+  }
+
+  return value
 }
 
 export class BonziRuntimeManager {
   private readonly getShellState: () => ShellState
   private readonly getCompanionWindow: () => BrowserWindow | null
-  private readonly configState = new BonziRuntimeConfigState()
-  private readonly events = new BonziRuntimeEventEmitter()
   private readonly pluginSettingsStore = new BonziPluginSettingsStore()
+  private readonly configState = new BonziRuntimeConfigState({
+    getProviderSettings: () => this.pluginSettingsStore.getPersistedProviderSettings()
+  })
+  private readonly events = new BonziRuntimeEventEmitter()
   private readonly pluginDiscoveryService = new BonziPluginDiscoveryService({
     settingsStore: this.pluginSettingsStore
   })
@@ -108,7 +154,8 @@ export class BonziRuntimeManager {
                 shellState: this.getShellState(),
                 companionWindow: this.getCompanionWindow(),
                 discordBrowserService: options.discordBrowserService,
-                workspaceFileService: options.workspaceFileService
+                workspaceFileService: options.workspaceFileService,
+                hermesService: options.hermesService
               },
               { approved }
             )
@@ -174,7 +221,9 @@ export class BonziRuntimeManager {
     this.turnRunner = new BonziRuntimeTurnRunner({
       configState: this.configState,
       getRuntime: () => this.lifecycle.getOrCreateRuntime(),
-      workflowManager: this.workflowManager
+      workflowManager: this.workflowManager,
+      getRoutingSettings: () =>
+        this.pluginSettingsStore.getRuntimeRoutingSettings().settings
     })
     this.workflowBridge = new BonziRuntimeWorkflowBridge({
       workflowManager: this.workflowManager,
@@ -212,10 +261,74 @@ export class BonziRuntimeManager {
     return this.pluginOperations.getRuntimeApprovalSettings()
   }
 
+  getAssistantProviderSettings(): AssistantProviderSettings {
+    return this.pluginSettingsStore.getProviderSettings({
+      envConfig: loadBonziElizaConfig(),
+      effectiveConfig: this.configState.sync()
+    })
+  }
+
+  updateAssistantProviderSettings(
+    request: UpdateAssistantProviderSettingsRequest
+  ): AssistantProviderSettings {
+    this.pluginSettingsStore.updateProviderSettings(request)
+    this.configState.sync()
+    this.lifecycle.invalidateConfigSignature()
+    return this.getAssistantProviderSettings()
+  }
+
+  async listPiAiModelOptions(
+    request: ListPiAiModelOptionsRequest = {}
+  ): Promise<ListPiAiModelOptionsResult> {
+    try {
+      const { listPiAiModelOptions } = await import('@elizaos/plugin-pi-ai')
+      let lastError: string | undefined
+
+      for (const agentDir of getPiAgentDirCandidates(request.agentDir)) {
+        try {
+          const result = await listPiAiModelOptions(agentDir)
+
+          if (result.models.length > 0 || agentDir === undefined) {
+            return {
+              ok: true,
+              defaultModelSpec: result.defaultModelSpec,
+              models: result.models,
+              agentDir
+            }
+          }
+        } catch (error) {
+          lastError = normalizeError(error)
+        }
+      }
+
+      return {
+        ok: true,
+        models: [],
+        error: lastError
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        models: [],
+        error: normalizeError(error)
+      }
+    }
+  }
+
   updateRuntimeApprovalSettings(
     request: UpdateRuntimeApprovalSettingsRequest
   ): RuntimeApprovalSettings {
     return this.pluginOperations.updateRuntimeApprovalSettings(request)
+  }
+
+  getRuntimeRoutingSettings(): RuntimeRoutingSettingsResponse {
+    return this.pluginSettingsStore.getRuntimeRoutingSettings()
+  }
+
+  updateRuntimeRoutingSettings(
+    request: UpdateRuntimeRoutingSettingsRequest
+  ): RuntimeRoutingSettingsResponse {
+    return this.pluginSettingsStore.updateRuntimeRoutingSettings(request)
   }
 
   getCharacterSettings(): ElizaCharacterSettings {

@@ -6,11 +6,14 @@ interface SettingsStatusControllerOptions {
 export interface SettingsStatusController {
   setStatusMessage(message: string): void
   setRuntimeReloadPending(pending: boolean): void
+  setProviderSaving(saving: boolean): void
   setPluginSaving(saving: boolean): void
   setApprovalSaving(saving: boolean): void
   setCharacterSaving(saving: boolean): void
   setKnowledgeSaving(saving: boolean): void
   setWorkspaceSaving(saving: boolean): void
+  setHermesSaving(saving: boolean): void
+  setRoutingSaving(saving: boolean): void
   setApplyingRuntimeChanges(applying: boolean): void
   isApplyingRuntimeChanges(): boolean
   getRuntimeReloadPending(): boolean
@@ -21,18 +24,21 @@ export function createSettingsStatusController(
 ): SettingsStatusController {
   const { settingsStatusEl, applyRuntimeChangesButton } = options
 
+  let isProviderSaving = false
   let isPluginSaving = false
   let isApprovalSaving = false
   let isCharacterSaving = false
   let isKnowledgeSaving = false
   let isWorkspaceSaving = false
+  let isHermesSaving = false
+  let isRoutingSaving = false
   let isApplyingRuntimeChanges = false
   let isRuntimeReloadPending = false
   let settingsStatusMessage = ''
 
   const syncSettingsStatusUi = (): void => {
     const runtimeMessage = isRuntimeReloadPending
-      ? 'Runtime settings changes are pending. Apply Runtime Changes to reload elizaOS now.'
+      ? 'Runtime settings changes are pending. Apply Runtime Changes to reload Eliza and Hermes now.'
       : ''
 
     settingsStatusEl.textContent = [settingsStatusMessage, runtimeMessage]
@@ -43,11 +49,14 @@ export function createSettingsStatusController(
     applyRuntimeChangesButton.dataset.runtimeReloadPending = String(isRuntimeReloadPending)
     applyRuntimeChangesButton.hidden = !isRuntimeReloadPending
     applyRuntimeChangesButton.disabled =
+      isProviderSaving ||
       isPluginSaving ||
       isApprovalSaving ||
       isCharacterSaving ||
       isKnowledgeSaving ||
       isWorkspaceSaving ||
+      isHermesSaving ||
+      isRoutingSaving ||
       isApplyingRuntimeChanges
   }
 
@@ -60,6 +69,10 @@ export function createSettingsStatusController(
     },
     setRuntimeReloadPending: (pending) => {
       isRuntimeReloadPending = pending
+      syncSettingsStatusUi()
+    },
+    setProviderSaving: (saving) => {
+      isProviderSaving = saving
       syncSettingsStatusUi()
     },
     setPluginSaving: (saving) => {
@@ -80,6 +93,14 @@ export function createSettingsStatusController(
     },
     setWorkspaceSaving: (saving) => {
       isWorkspaceSaving = saving
+      syncSettingsStatusUi()
+    },
+    setHermesSaving: (saving) => {
+      isHermesSaving = saving
+      syncSettingsStatusUi()
+    },
+    setRoutingSaving: (saving) => {
+      isRoutingSaving = saving
       syncSettingsStatusUi()
     },
     setApplyingRuntimeChanges: (applying) => {

@@ -9,6 +9,9 @@ export function sanitizeAssistantActionParams(
 
   const url = normalizeText(value.url)
   const query = normalizeText(value.query)
+  const prompt = normalizePromptText(value.prompt)
+  const surfCommand = normalizeSurfCommand(value.surfCommand)
+  const surfArgs = normalizeSurfArgs(value.surfArgs)
   const direction = normalizeScrollDirection(value.direction)
   const amount = normalizeScrollAmount(value.amount)
   const text = normalizeDiscordDraftText(value.text)
@@ -23,6 +26,18 @@ export function sanitizeAssistantActionParams(
 
   if (query) {
     params.query = truncate(query, 500)
+  }
+
+  if (prompt) {
+    params.prompt = truncate(prompt, 24_000)
+  }
+
+  if (surfCommand) {
+    params.surfCommand = truncate(surfCommand, 80)
+  }
+
+  if (surfArgs.length > 0) {
+    params.surfArgs = surfArgs.map((arg) => truncate(arg, 2_000))
   }
 
   if (direction) {
@@ -54,6 +69,9 @@ export function hasAssistantActionParams(
   return Boolean(
     params?.url ||
       params?.query ||
+      params?.prompt ||
+      params?.surfCommand ||
+      (params?.surfArgs !== undefined && params.surfArgs.length > 0) ||
       params?.direction ||
       params?.amount !== undefined ||
       params?.text ||
@@ -64,6 +82,37 @@ export function hasAssistantActionParams(
 
 export function normalizeText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+export function normalizePromptText(value: unknown): string {
+  const text = normalizeText(value)
+
+  if (!text) {
+    return ''
+  }
+
+  return text.replace(/\u0000/gu, '')
+}
+
+export function normalizeSurfCommand(value: unknown): string {
+  const command = normalizeText(value).toLowerCase()
+
+  if (!command || /[^a-z0-9.-]/u.test(command)) {
+    return ''
+  }
+
+  return command
+}
+
+export function normalizeSurfArgs(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .map((arg) => normalizeText(arg))
+    .filter((arg) => Boolean(arg) && !/[\u0000\r\n]/u.test(arg))
+    .slice(0, 12)
 }
 
 export function normalizeScrollDirection(

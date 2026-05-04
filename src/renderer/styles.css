@@ -255,6 +255,17 @@ p {
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.settings-panel__header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-panel__nav-link {
+  text-decoration: none;
+  white-space: nowrap;
+}
+
 .settings-panel__eyebrow {
   margin: 0 0 4px;
   color: rgba(126, 215, 255, 0.78);
@@ -1135,6 +1146,12 @@ p {
     border-radius: 22px;
   }
 
+  body[data-bonzi-surface='admin'] .settings-panel.web-admin__shell {
+    width: min(1160px, 100%);
+    min-height: calc(100vh - 16px);
+    height: auto;
+  }
+
   .settings-panel__layout {
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(0, 1fr);
@@ -1142,12 +1159,16 @@ p {
 
   .settings-panel__nav {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 8px;
     overflow-x: visible;
     padding: 10px;
     border-right: 0;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  body[data-bonzi-surface='admin'] .settings-panel__nav {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .settings-panel__tab {
@@ -1698,6 +1719,29 @@ p {
   display: none;
 }
 
+.routing-settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.routing-settings__rule {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 1rem;
+}
+
+.routing-settings__grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.routing-settings__warnings {
+  color: var(--color-warning, #f6c177);
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -1716,6 +1760,149 @@ p {
   opacity: 0.55;
   cursor: not-allowed;
   transform: none;
+}
+
+body[data-bonzi-surface='admin'],
+body[data-bonzi-surface='admin'] #app {
+  min-height: 100%;
+  height: auto;
+  overflow: auto;
+  background: #070a12;
+}
+
+body[data-bonzi-surface='admin'] .web-admin {
+  min-height: 100vh;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(92, 198, 255, 0.16), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(140, 87, 255, 0.14), transparent 38%),
+    #070a12;
+}
+
+body[data-bonzi-surface='admin'] .settings-panel.web-admin__shell {
+  position: static;
+  width: min(1160px, 100%);
+  max-height: none;
+  min-height: calc(100vh - 48px);
+  margin: 0 auto;
+  transform: none;
+}
+
+body[data-bonzi-surface='admin'] .settings-panel__layout {
+  grid-template-columns: 224px minmax(0, 1fr);
+}
+
+body[data-bonzi-surface='admin'] .settings-panel__content {
+  padding: 20px;
+}
+
+body[data-bonzi-surface='admin'] .settings-panel__tab {
+  min-height: 60px;
+}
+
+.web-admin__title {
+  margin: 0 0 5px;
+  font-size: 1.34rem;
+  letter-spacing: -0.02em;
+}
+
+.web-admin__bridge-unavailable {
+  min-height: auto;
+}
+
+.runtime-admin,
+.runtime-admin__card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.runtime-admin__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.runtime-admin__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.runtime-admin__card {
+  padding: 14px;
+}
+
+.runtime-admin__card--wide {
+  grid-column: 1 / -1;
+}
+
+.runtime-admin__card h3 {
+  margin: 0;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.runtime-admin__facts {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.runtime-admin__facts div {
+  display: grid;
+  gap: 3px;
+}
+
+.runtime-admin__facts dt {
+  color: rgba(226, 231, 255, 0.62);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.runtime-admin__facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: rgba(249, 250, 255, 0.94);
+  font-size: 0.86rem;
+}
+
+.runtime-admin__json {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 14px;
+  color: rgba(226, 231, 255, 0.86);
+  background: rgba(3, 6, 16, 0.5);
+}
+
+.runtime-admin__tags,
+.runtime-admin__messages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.runtime-admin__tags li,
+.runtime-admin__messages li {
+  max-width: 100%;
+  padding: 6px 9px;
+  border-radius: 999px;
+  color: rgba(249, 250, 255, 0.9);
+  background: rgba(255, 255, 255, 0.07);
+  overflow-wrap: anywhere;
+}
+
+.runtime-admin__error {
+  color: rgba(255, 205, 205, 0.96);
 }
 
 @media (max-width: 680px) {
@@ -1750,5 +1937,87 @@ p {
 
   100% {
     width: 1.25em;
+  }
+}
+
+.hermes-settings__card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+.hermes-settings__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.hermes-settings__field--wide {
+  grid-column: 1 / -1;
+}
+
+.hermes-settings__custom-input {
+  margin-top: 8px;
+}
+
+.hermes-settings__prompt {
+  min-height: 132px;
+}
+
+.hermes-settings__gateway-toggle {
+  border-color: rgba(126, 215, 255, 0.24);
+  background: rgba(126, 215, 255, 0.08);
+}
+
+.hermes-settings__actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.hermes-settings__note,
+.hermes-settings__health {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .hermes-settings__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.hermes-settings__runtime-header {
+  margin-top: 18px;
+}
+
+.hermes-settings__status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.hermes-settings__status-item {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.hermes-settings__status-item strong,
+.hermes-settings__status-item small {
+  display: block;
+}
+
+.hermes-settings__status-item small {
+  margin-top: 4px;
+  color: var(--muted-text);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .hermes-settings__status-grid {
+    grid-template-columns: 1fr;
   }
 }

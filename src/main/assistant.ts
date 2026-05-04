@@ -10,6 +10,7 @@ import {
   type AssistantEvent,
   type AssistantMessage,
   type AssistantProviderInfo,
+  type AssistantProviderSettings,
   type AssistantRuntimeStatus,
   type BonziWorkflowRunSnapshot,
   type BonziWorkspaceSettings,
@@ -20,17 +21,30 @@ import {
   type RespondWorkflowApprovalRequest,
   type RespondWorkflowApprovalResponse,
   type RuntimeApprovalSettings,
+  type RuntimeRoutingSettingsResponse,
   type ElizaPluginInstallRequest,
   type ElizaPluginOperationResult,
   type ElizaPluginSettings,
   type ElizaPluginUninstallRequest,
+  type HermesHealthCheckRequest,
+  type HermesHealthCheckResult,
+  type HermesModelAuthCheckResult,
+  type HermesModelAuthSettingsResponse,
+  type HermesRuntimeSettingsResponse,
+  type HermesSecondaryRuntimeSummary,
+  type UpdateHermesModelAuthSettingsRequest,
+  type UpdateHermesRuntimeSettingsRequest,
   type ImportKnowledgeDocumentsRequest,
   type ImportKnowledgeFoldersRequest,
+  type ListPiAiModelOptionsRequest,
+  type ListPiAiModelOptionsResult,
   type KnowledgeImportResult,
   type KnowledgeImportStatus,
+  type UpdateAssistantProviderSettingsRequest,
   type UpdateElizaCharacterSettingsRequest,
   type UpdateElizaPluginSettingsRequest,
   type UpdateRuntimeApprovalSettingsRequest,
+  type UpdateRuntimeRoutingSettingsRequest,
   type ShellState,
   type StartKnowledgeImportResult
 } from '../shared/contracts'
@@ -42,6 +56,7 @@ import { createDiscordBrowserServiceFromEnv } from './discord-browser-service'
 import { BonziWorkspaceFileService } from './bonzi-workspace-file-service'
 import { PendingAssistantActions } from './pending-assistant-actions'
 import { BonziWorkflowContinuationCoordinator } from './workflow-continuation-coordinator'
+import { HermesSecondaryRuntimeService } from './hermes/hermes-secondary-runtime-service'
 
 interface AssistantServiceOptions {
   getCompanionWindow: () => BrowserWindow | null
@@ -54,6 +69,13 @@ export interface AssistantService {
   getRuntimeStatus: () => AssistantRuntimeStatus
   getPluginSettings: () => ElizaPluginSettings
   getRuntimeApprovalSettings: () => RuntimeApprovalSettings
+  getAssistantProviderSettings: () => AssistantProviderSettings
+  updateAssistantProviderSettings: (
+    request: UpdateAssistantProviderSettingsRequest
+  ) => Promise<AssistantProviderSettings>
+  listPiAiModelOptions: (
+    request?: ListPiAiModelOptionsRequest
+  ) => Promise<ListPiAiModelOptionsResult>
   updateRuntimeApprovalSettings: (
     request: UpdateRuntimeApprovalSettingsRequest
   ) => Promise<RuntimeApprovalSettings>
@@ -74,6 +96,23 @@ export interface AssistantService {
   getWorkspaceSettings: () => Promise<BonziWorkspaceSettings>
   setWorkspaceFolder: (folderPath: string) => Promise<BonziWorkspaceSettings>
   resetWorkspaceFolder: () => Promise<BonziWorkspaceSettings>
+  getHermesSecondaryRuntimeSummary: () => HermesSecondaryRuntimeSummary
+  getHermesRuntimeSettings: () => HermesRuntimeSettingsResponse
+  updateHermesRuntimeSettings: (
+    request: UpdateHermesRuntimeSettingsRequest
+  ) => Promise<HermesRuntimeSettingsResponse>
+  getHermesModelAuthSettings: () => HermesModelAuthSettingsResponse
+  updateHermesModelAuthSettings: (
+    request: UpdateHermesModelAuthSettingsRequest
+  ) => Promise<HermesModelAuthSettingsResponse>
+  checkHermesModelAuthStatus: () => Promise<HermesModelAuthCheckResult>
+  checkHermesHealth: (
+    request: HermesHealthCheckRequest
+  ) => Promise<HermesHealthCheckResult>
+  getRuntimeRoutingSettings: () => RuntimeRoutingSettingsResponse
+  updateRuntimeRoutingSettings: (
+    request: UpdateRuntimeRoutingSettingsRequest
+  ) => Promise<RuntimeRoutingSettingsResponse>
   discoverPlugins: (
     request?: ElizaPluginDiscoveryRequest
   ) => Promise<ElizaPluginSettings>
@@ -115,11 +154,13 @@ export function createAssistantService(
   const workspaceFileService = new BonziWorkspaceFileService({
     userDataDir: app.getPath('userData')
   })
+  const hermesService = new HermesSecondaryRuntimeService()
   const runtimeManager = new BonziRuntimeManager({
     getShellState: options.getShellState,
     getCompanionWindow: options.getCompanionWindow,
     discordBrowserService,
-    workspaceFileService
+    workspaceFileService,
+    hermesService
   })
   let continuationCoordinator: BonziWorkflowContinuationCoordinator
   const pendingActions = new PendingAssistantActions({
@@ -128,6 +169,7 @@ export function createAssistantService(
     getApprovalSettings: () => runtimeManager.getRuntimeApprovalSettings(),
     discordBrowserService,
     workspaceFileService,
+    hermesService,
     linkExternalAction: (action) => {
       runtimeManager.linkExternalAction(action)
     },
@@ -159,6 +201,13 @@ export function createAssistantService(
     getRuntimeStatus: () => runtimeManager.getRuntimeStatus(),
     getPluginSettings: () => runtimeManager.getPluginSettings(),
     getRuntimeApprovalSettings: () => runtimeManager.getRuntimeApprovalSettings(),
+    getAssistantProviderSettings: () => runtimeManager.getAssistantProviderSettings(),
+    async updateAssistantProviderSettings(
+      request
+    ): Promise<AssistantProviderSettings> {
+      return runtimeManager.updateAssistantProviderSettings(request)
+    },
+    listPiAiModelOptions: (request) => runtimeManager.listPiAiModelOptions(request),
     async updateRuntimeApprovalSettings(request): Promise<RuntimeApprovalSettings> {
       return runtimeManager.updateRuntimeApprovalSettings(request)
     },
@@ -176,6 +225,21 @@ export function createAssistantService(
     getWorkspaceSettings: async () => workspaceFileService.getSettings(),
     setWorkspaceFolder: (folderPath) => workspaceFileService.setWorkspaceDir(folderPath),
     resetWorkspaceFolder: () => workspaceFileService.resetWorkspaceDir(),
+    getHermesSecondaryRuntimeSummary: () => hermesService.getSummary(),
+    getHermesRuntimeSettings: () => hermesService.getHermesRuntimeSettings(),
+    updateHermesRuntimeSettings: (request) =>
+      hermesService.updateHermesRuntimeSettings(request),
+    getHermesModelAuthSettings: () => hermesService.getHermesModelAuthSettings(),
+    updateHermesModelAuthSettings: (request) =>
+      hermesService.updateHermesModelAuthSettings(request),
+    checkHermesModelAuthStatus: async () => hermesService.checkHermesModelAuthStatus(),
+    checkHermesHealth: (request) => hermesService.checkHermesHealth(request),
+    getRuntimeRoutingSettings: () => runtimeManager.getRuntimeRoutingSettings(),
+    async updateRuntimeRoutingSettings(
+      request
+    ): Promise<RuntimeRoutingSettingsResponse> {
+      return runtimeManager.updateRuntimeRoutingSettings(request)
+    },
     discoverPlugins: (request) => runtimeManager.discoverPlugins(request),
     updatePluginSettings: (request) => runtimeManager.updatePluginSettings(request),
     installPlugin: (request) => runtimeManager.installPlugin(request),
@@ -190,7 +254,13 @@ export function createAssistantService(
     async reloadRuntime(): Promise<AssistantRuntimeStatus> {
       continuationCoordinator.dispose()
       pendingActions.clear()
-      return runtimeManager.reloadRuntime()
+      const primaryStatus = await runtimeManager.reloadRuntime()
+      try {
+        await hermesService.reloadRuntime()
+      } catch (error) {
+        console.warn('Hermes secondary runtime reload failed.', error)
+      }
+      return primaryStatus
     },
     subscribe: (listener) => runtimeManager.subscribe(listener),
     getWorkflowRuns: () => runtimeManager.getWorkflowRuns(),
@@ -204,6 +274,7 @@ export function createAssistantService(
       continuationCoordinator.dispose()
       pendingActions.clear()
       await runtimeManager.dispose()
+      await hermesService.dispose()
       await discordBrowserService.dispose()
     }
   }

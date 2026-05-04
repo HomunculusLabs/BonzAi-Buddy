@@ -1,9 +1,18 @@
-import { writeFile } from 'node:fs/promises'
+import { access, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { launchBonziApp } from './fixtures/app'
 import { startFakeDiscordDomServer } from './fixtures/fake-servers'
 import { readJsonFile } from './fixtures/json'
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
+}
 
 async function runDiscordContextAction(url: string) {
   const session = await launchBonziApp({
@@ -236,6 +245,121 @@ test('does not overwrite existing composer text when typing a draft', async () =
       await session.close()
     }
     await discord.close()
+  }
+})
+
+test('continues Eliza workflow after Hermes secondary consultation and persists observation', async () => {
+  const session = await launchBonziApp({
+    userDataDirPrefix: 'bonzi-e2e-hermes-delegation-'
+  })
+
+  try {
+    const { window, userDataDir } = session
+    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+    await window.evaluate(() => {
+      const recordedEvents: unknown[] = []
+      ;(window as Window & { __bonziE2eEvents?: unknown[] }).__bonziE2eEvents =
+        recordedEvents
+      window.bonzi.assistant.onEvent((event) => {
+        recordedEvents.push(event)
+      })
+    })
+    await window.evaluate(() =>
+      window.bonzi.settings.updateRuntimeApprovalSettings({
+        continuation: { postActionDelayMs: 25 }
+      })
+    )
+
+    const response = await window.evaluate(() =>
+      window.bonzi.assistant.sendCommand({ command: 'hermes delegation e2e' })
+    )
+    expect(response.actions).toHaveLength(1)
+    expect(response.actions[0]?.type).toBe('hermes-run')
+    expect(response.actions[0]?.params?.prompt).toContain('E2E Hermes secondary consultation')
+    expect(response.actions[0]?.description).toContain('Eliza remains the orchestrator')
+
+    const execution = await window.evaluate(
+      (actionId) => window.bonzi.assistant.executeAction({ actionId, confirmed: false }),
+      response.actions[0]!.id
+    )
+    expect(execution.ok).toBe(true)
+    expect(execution.message).toContain('Hermes consultation completed')
+    expect(execution.action?.resultMessage).toContain('Hermes secondary consultation:')
+    expect(execution.action?.resultMessage).toContain('E2E Hermes secondary consultation')
+    expect(execution.continuationScheduled).toBe(true)
+
+    await expect
+      .poll(() =>
+        window.evaluate(
+          () =>
+            ((window as Window & {
+              __bonziE2eEvents?: Array<{
+                type?: string
+                turn?: { message?: { content?: string } }
+              }>
+            }).__bonziE2eEvents ?? [])
+              .filter((event) => event.type === 'assistant-turn-created')
+              .map((event) => event.turn?.message?.content)
+        )
+      )
+      .toContain('Eliza received the Hermes observation and completed the delegation workflow.')
+
+    const finalRun = await window.evaluate(async () => {
+      const runs = await window.bonzi.assistant.getWorkflowRuns()
+      return runs.find((run) => run.userCommand === 'hermes delegation e2e') ?? null
+    })
+    expect(finalRun?.status).toBe('completed')
+    expect(finalRun?.steps.map((step) => step.status)).toEqual(['completed'])
+    expect(finalRun?.steps[0]?.detail).toContain('Hermes observation captured')
+    expect(finalRun?.steps[0]?.detail).not.toContain('E2E Hermes secondary consultation: identify one risk and one next step.')
+
+    const history = await window.evaluate(() => window.bonzi.assistant.getHistory())
+    const serializedHistory = history.map((message) => message.content).join('\n')
+    expect(serializedHistory).toContain(
+      '[Bonzi action observation: hermes-run / completed]'
+    )
+    expect(serializedHistory).toContain('Hermes secondary consultation:')
+    expect(serializedHistory).not.toContain('bonzi-hermes-conversation-history')
+    await expect(
+      fileExists(join(userDataDir, 'bonzi-hermes-conversation-history.json'))
+    ).resolves.toBe(false)
+  } finally {
+    await session.close()
+  }
+})
+
+test('executes Hermes cron inspection as a read-only observation', async () => {
+  const session = await launchBonziApp({
+    userDataDirPrefix: 'bonzi-e2e-hermes-cron-'
+  })
+
+  try {
+    const { window } = session
+    await expect(window.locator('.shell[data-app-ready="ready"]')).toBeVisible()
+
+    const response = await window.evaluate(() =>
+      window.bonzi.assistant.sendCommand({ command: 'hermes cron e2e' })
+    )
+    expect(response.actions).toHaveLength(1)
+    expect(response.actions[0]?.type).toBe('inspect-cron-jobs')
+    expect(response.actions[0]?.params?.query).toBe('e2e')
+    expect(response.actions[0]?.description).toContain('read-only')
+
+    const execution = await window.evaluate(
+      (actionId) => window.bonzi.assistant.executeAction({ actionId, confirmed: false }),
+      response.actions[0]!.id
+    )
+    expect(execution.ok).toBe(true)
+    expect(execution.message).toContain('Hermes cron inspection fixture')
+
+    const history = await window.evaluate(() => window.bonzi.assistant.getHistory())
+    const serializedHistory = history.map((message) => message.content).join('\n')
+    expect(serializedHistory).toContain(
+      '[Bonzi action observation: inspect-cron-jobs / completed]'
+    )
+    expect(serializedHistory).toContain('Hermes cron inspection fixture')
+  } finally {
+    await session.close()
   }
 })
 

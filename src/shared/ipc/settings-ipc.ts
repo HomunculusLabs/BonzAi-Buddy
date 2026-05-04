@@ -17,9 +17,28 @@ import type {
   StartKnowledgeImportResult
 } from '../contracts/knowledge'
 import type {
+  HermesHealthCheckRequest,
+  HermesHealthCheckResult,
+  HermesModelAuthCheckResult,
+  HermesModelAuthSettingsResponse,
+  HermesRuntimeSettingsResponse,
+  UpdateHermesModelAuthSettingsRequest,
+  UpdateHermesRuntimeSettingsRequest
+} from '../contracts/hermes'
+import type {
   ElizaPluginSettings,
   UpdateElizaPluginSettingsRequest
 } from '../contracts/plugins'
+import type {
+  RuntimeRoutingSettingsResponse,
+  UpdateRuntimeRoutingSettingsRequest
+} from '../contracts/routing-rules'
+import type {
+  AssistantProviderSettings,
+  ListPiAiModelOptionsRequest,
+  ListPiAiModelOptionsResult,
+  UpdateAssistantProviderSettingsRequest
+} from '../contracts/provider'
 import type {
   BonziWorkspaceSettings,
   ResetBonziWorkspaceFolderResult,
@@ -35,6 +54,18 @@ export type SettingsIpcInvokeChannelMap = {
   [IPC_CHANNELS.settings.updateElizaPlugins]: {
     args: [request: UpdateElizaPluginSettingsRequest]
     response: ElizaPluginSettings
+  }
+  [IPC_CHANNELS.settings.getAssistantProviderSettings]: {
+    args: []
+    response: AssistantProviderSettings
+  }
+  [IPC_CHANNELS.settings.updateAssistantProviderSettings]: {
+    args: [request: UpdateAssistantProviderSettingsRequest]
+    response: AssistantProviderSettings
+  }
+  [IPC_CHANNELS.settings.listPiAiModelOptions]: {
+    args: [request?: ListPiAiModelOptionsRequest]
+    response: ListPiAiModelOptionsResult
   }
   [IPC_CHANNELS.settings.getRuntimeApprovalSettings]: {
     args: []
@@ -84,6 +115,38 @@ export type SettingsIpcInvokeChannelMap = {
     args: []
     response: ResetBonziWorkspaceFolderResult
   }
+  [IPC_CHANNELS.settings.getHermesRuntimeSettings]: {
+    args: []
+    response: HermesRuntimeSettingsResponse
+  }
+  [IPC_CHANNELS.settings.updateHermesRuntimeSettings]: {
+    args: [request: UpdateHermesRuntimeSettingsRequest]
+    response: HermesRuntimeSettingsResponse
+  }
+  [IPC_CHANNELS.settings.getHermesModelAuthSettings]: {
+    args: []
+    response: HermesModelAuthSettingsResponse
+  }
+  [IPC_CHANNELS.settings.updateHermesModelAuthSettings]: {
+    args: [request: UpdateHermesModelAuthSettingsRequest]
+    response: HermesModelAuthSettingsResponse
+  }
+  [IPC_CHANNELS.settings.checkHermesModelAuthStatus]: {
+    args: []
+    response: HermesModelAuthCheckResult
+  }
+  [IPC_CHANNELS.settings.checkHermesHealth]: {
+    args: [request: HermesHealthCheckRequest]
+    response: HermesHealthCheckResult
+  }
+  [IPC_CHANNELS.settings.getRuntimeRoutingSettings]: {
+    args: []
+    response: RuntimeRoutingSettingsResponse
+  }
+  [IPC_CHANNELS.settings.updateRuntimeRoutingSettings]: {
+    args: [request: UpdateRuntimeRoutingSettingsRequest]
+    response: RuntimeRoutingSettingsResponse
+  }
 }
 
 export interface SettingsBridge {
@@ -92,6 +155,13 @@ export interface SettingsBridge {
     updateElizaPlugins: (
       request: UpdateElizaPluginSettingsRequest
     ) => Promise<ElizaPluginSettings>
+    getAssistantProviderSettings: () => Promise<AssistantProviderSettings>
+    updateAssistantProviderSettings: (
+      request: UpdateAssistantProviderSettingsRequest
+    ) => Promise<AssistantProviderSettings>
+    listPiAiModelOptions: (
+      request?: ListPiAiModelOptionsRequest
+    ) => Promise<ListPiAiModelOptionsResult>
     getRuntimeApprovalSettings: () => Promise<RuntimeApprovalSettings>
     updateRuntimeApprovalSettings: (
       request: UpdateRuntimeApprovalSettingsRequest
@@ -114,5 +184,21 @@ export interface SettingsBridge {
     getWorkspaceSettings: () => Promise<BonziWorkspaceSettings>
     selectWorkspaceFolder: () => Promise<SelectBonziWorkspaceFolderResult>
     resetWorkspaceFolder: () => Promise<ResetBonziWorkspaceFolderResult>
+    getHermesRuntimeSettings: () => Promise<HermesRuntimeSettingsResponse>
+    updateHermesRuntimeSettings: (
+      request: UpdateHermesRuntimeSettingsRequest
+    ) => Promise<HermesRuntimeSettingsResponse>
+    getHermesModelAuthSettings: () => Promise<HermesModelAuthSettingsResponse>
+    updateHermesModelAuthSettings: (
+      request: UpdateHermesModelAuthSettingsRequest
+    ) => Promise<HermesModelAuthSettingsResponse>
+    checkHermesModelAuthStatus: () => Promise<HermesModelAuthCheckResult>
+    checkHermesHealth: (
+      request: HermesHealthCheckRequest
+    ) => Promise<HermesHealthCheckResult>
+    getRuntimeRoutingSettings: () => Promise<RuntimeRoutingSettingsResponse>
+    updateRuntimeRoutingSettings: (
+      request: UpdateRuntimeRoutingSettingsRequest
+    ) => Promise<RuntimeRoutingSettingsResponse>
   }
 }

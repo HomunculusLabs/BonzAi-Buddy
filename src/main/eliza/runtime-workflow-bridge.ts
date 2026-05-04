@@ -80,17 +80,18 @@ export class BonziRuntimeWorkflowBridge {
       return { shouldConsiderContinuation: false }
     }
 
+    const workflowDetail = formatExternalActionWorkflowDetail(action, resultMessage)
     const workflowRun =
       action.status === 'failed'
         ? this.workflowManager.failExternalAction({
             runId: action.workflowRunId,
             stepId: action.workflowStepId,
-            detail: resultMessage
+            detail: workflowDetail
           })
         : this.workflowManager.completeExternalAction({
             runId: action.workflowRunId,
             stepId: action.workflowStepId,
-            detail: resultMessage
+            detail: workflowDetail
           })
 
     if (!workflowRun) {
@@ -145,4 +146,33 @@ export class BonziRuntimeWorkflowBridge {
   failWorkflowRun(runId: string, error: string): BonziWorkflowRunSnapshot | null {
     return this.workflowManager.failRun(runId, { error })
   }
+}
+
+function formatExternalActionWorkflowDetail(
+  action: AssistantAction,
+  resultMessage: string
+): string {
+  if (action.type !== 'hermes-run') {
+    return resultMessage
+  }
+
+  if (action.status === 'failed') {
+    return summarizeText(resultMessage, 500)
+  }
+
+  return 'Hermes observation captured. Eliza is synthesizing the final answer.'
+}
+
+function summarizeText(value: string, maxLength: number): string {
+  const normalized = value
+    .replace(/\s+/gu, ' ')
+    .trim()
+
+  if (!normalized) {
+    return ''
+  }
+
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`
+    : normalized
 }

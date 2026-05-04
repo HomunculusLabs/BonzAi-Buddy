@@ -3,6 +3,8 @@ import { dirname, join } from 'node:path'
 import { app } from 'electron'
 import type {
   AssistantProviderInfo,
+  AssistantProviderKind,
+  AssistantProviderSettings,
   ElizaCharacterSettings,
   ElizaPluginExecutionPolicy,
   ElizaPluginId,
@@ -10,11 +12,20 @@ import type {
   ElizaPluginSettings,
   ElizaPluginSource,
   RuntimeApprovalSettings,
+  PersistedAssistantProviderSettings,
+  RuntimeRoutingSettingsResponse,
+  UpdateRuntimeRoutingSettingsRequest,
+  UpdateAssistantProviderSettingsRequest,
   UpdateElizaCharacterSettingsRequest,
   UpdateElizaPluginSettingsRequest,
   UpdateRuntimeApprovalSettingsRequest
 } from '../../shared/contracts'
 import { isRecord, normalizeOptionalString } from '../../shared/value-utils'
+import {
+  DEFAULT_OPENAI_BASE_URL,
+  DEFAULT_OPENAI_MODEL,
+  type BonziElizaResolvedConfig
+} from './config'
 import {
   DEFAULT_PLUGIN_RUNTIME_SETTINGS,
   SETTINGS_FILE_NAME,
@@ -28,10 +39,12 @@ import {
   canonicalizePluginExecutionPolicy,
   canonicalizePluginLifecycleStatus,
   createDefaultPluginState,
+  normalizePersistedProviderSettings,
   defaultEnabledForPlugin,
   isRequiredPluginId,
   normalizeParsedSettings,
   normalizePluginId,
+  normalizeRuntimeRoutingSettings,
   normalizeRuntimeContinuationSettings,
   normalizeStringArray,
   validateUpdateRequest,
@@ -52,6 +65,39 @@ export type {
   BonziElizaPluginRuntimeSettings,
   BonziPersistedPluginRecordSnapshot
 } from './plugin-settings-model'
+
+
+function validateProviderSettingsUpdate(
+  request: UpdateAssistantProviderSettingsRequest
+): PersistedAssistantProviderSettings {
+  if (!isRecord(request)) {
+    throw new Error('Provider settings update must be an object.')
+  }
+
+  if (!isAssistantProviderKind(request.provider)) {
+    throw new Error('Provider settings update has an unsupported provider.')
+  }
+
+  const normalized = normalizePersistedProviderSettings({
+    provider: request.provider,
+    openaiCompatible: request.openaiCompatible,
+    piAi: request.piAi
+  }).settings
+
+  if (!normalized.provider) {
+    throw new Error('Provider settings update has an unsupported provider.')
+  }
+
+  return normalized
+}
+
+function normalizeProviderKind(value: unknown): AssistantProviderKind {
+  return isAssistantProviderKind(value) ? value : 'eliza-classic'
+}
+
+function isAssistantProviderKind(value: unknown): value is AssistantProviderKind {
+  return value === 'eliza-classic' || value === 'openai-compatible' || value === 'pi-ai'
+}
 
 export class BonziPluginSettingsStore {
   private readonly settingsPath: string
@@ -80,6 +126,119 @@ export class BonziPluginSettingsStore {
     }
   }
 
+  getPersistedProviderSettings(): PersistedAssistantProviderSettings {
+    return { ...this.readPersistedPluginInventory().providerSettings }
+  }
+
+  getRuntimeRoutingSettings(): RuntimeRoutingSettingsResponse {
+    const loaded = this.readPersistedPluginInventory()
+    return {
+      settings: loaded.routingSettings,
+      warnings: loaded.routingWarnings
+    }
+  }
+
+  updateRuntimeRoutingSettings(
+    request: UpdateRuntimeRoutingSettingsRequest
+  ): RuntimeRoutingSettingsResponse {
+    const loaded = this.readPersistedPluginInventory()
+    const normalized = normalizeRuntimeRoutingSettings({
+      ...loaded.routingSettings,
+      ...(isRecord(request) ? request : {})
+    })
+
+    if (!isRecord(request)) {
+      throw new Error('Routing settings update must be an object.')
+    }
+
+    this.writePersistedSettings({
+      schemaVersion: 2,
+      plugins: loaded.inventory,
+      approvalsEnabled: loaded.approvalsEnabled,
+      continuation: loaded.continuation,
+      character: toPersistedCharacterSettings(loaded.characterSettings),
+      provider: loaded.providerSettings,
+      routing: normalized.settings
+    })
+
+    return {
+      settings: normalized.settings,
+      warnings: normalized.warnings
+    }
+  }
+
+  getProviderSettings(input: {
+    envConfig: BonziElizaResolvedConfig
+    effectiveConfig: BonziElizaResolvedConfig
+  }): AssistantProviderSettings {
+    const persisted = this.readPersistedPluginInventory().providerSettings
+    const provider = normalizeProviderKind(input.effectiveConfig.requestedProvider)
+
+    return {
+      provider,
+      source: persisted.provider ? 'settings' : 'env',
+      effectiveProvider: input.effectiveConfig.provider,
+      envProvider: input.envConfig.provider,
+      openaiCompatible: {
+        baseUrl:
+          input.effectiveConfig.openai?.baseUrl ??
+          persisted.openaiCompatible?.baseUrl ??
+          input.envConfig.openai?.baseUrl ??
+          DEFAULT_OPENAI_BASE_URL,
+        model:
+          input.effectiveConfig.openai?.model ??
+          persisted.openaiCompatible?.model ??
+          input.envConfig.openai?.model ??
+          DEFAULT_OPENAI_MODEL
+      },
+      piAi: {
+        agentDir:
+          input.effectiveConfig.piAi?.agentDir ??
+          persisted.piAi?.agentDir ??
+          input.envConfig.piAi?.agentDir ??
+          '',
+        modelSpec:
+          input.effectiveConfig.piAi?.modelSpec ??
+          persisted.piAi?.modelSpec ??
+          input.envConfig.piAi?.modelSpec ??
+          '',
+        smallModelSpec:
+          input.effectiveConfig.piAi?.smallModelSpec ??
+          persisted.piAi?.smallModelSpec ??
+          input.envConfig.piAi?.smallModelSpec ??
+          '',
+        largeModelSpec:
+          input.effectiveConfig.piAi?.largeModelSpec ??
+          persisted.piAi?.largeModelSpec ??
+          input.envConfig.piAi?.largeModelSpec ??
+          '',
+        priority:
+          input.effectiveConfig.piAi?.priority ??
+          persisted.piAi?.priority ??
+          input.envConfig.piAi?.priority ??
+          '10000'
+      }
+    }
+  }
+
+  updateProviderSettings(
+    request: UpdateAssistantProviderSettingsRequest
+  ): PersistedAssistantProviderSettings {
+    const providerSettings = validateProviderSettingsUpdate(request)
+    const loaded = this.readPersistedPluginInventory()
+
+    this.writePersistedSettings({
+      schemaVersion: 2,
+      plugins: loaded.inventory,
+      approvalsEnabled: loaded.approvalsEnabled,
+      continuation: loaded.continuation,
+      character: toPersistedCharacterSettings(loaded.characterSettings),
+      provider: providerSettings
+    })
+
+    return providerSettings
+  }
+
   getCharacterSettings(): ElizaCharacterSettings {
     return toElizaCharacterSettings(
       this.readPersistedPluginInventory().characterSettings
@@ -97,7 +256,8 @@ export class BonziPluginSettingsStore {
       plugins: loaded.inventory,
       approvalsEnabled: loaded.approvalsEnabled,
       continuation: loaded.continuation,
-      character: toPersistedCharacterSettings(characterSettings)
+      character: toPersistedCharacterSettings(characterSettings),
+      provider: loaded.providerSettings
     })
 
     return toElizaCharacterSettings(characterSettings)
@@ -136,7 +296,8 @@ export class BonziPluginSettingsStore {
       plugins: loaded.inventory,
       approvalsEnabled,
       continuation,
-      character: toPersistedCharacterSettings(loaded.characterSettings)
+      character: toPersistedCharacterSettings(loaded.characterSettings),
+      provider: loaded.providerSettings
     })
 
     return {
@@ -222,7 +383,8 @@ export class BonziPluginSettingsStore {
       plugins: state,
       approvalsEnabled: loaded.approvalsEnabled,
       continuation: loaded.continuation,
-      character: toPersistedCharacterSettings(loaded.characterSettings)
+      character: toPersistedCharacterSettings(loaded.characterSettings),
+      provider: loaded.providerSettings
     })
   }
 
@@ -243,7 +405,8 @@ export class BonziPluginSettingsStore {
       plugins: state,
       approvalsEnabled: loaded.approvalsEnabled,
       continuation: loaded.continuation,
-      character: toPersistedCharacterSettings(loaded.characterSettings)
+      character: toPersistedCharacterSettings(loaded.characterSettings),
+      provider: loaded.providerSettings
     })
   }
 
@@ -294,7 +457,8 @@ export class BonziPluginSettingsStore {
       plugins: state,
       approvalsEnabled: loaded.approvalsEnabled,
       continuation: loaded.continuation,
-      character: toPersistedCharacterSettings(loaded.characterSettings)
+      character: toPersistedCharacterSettings(loaded.characterSettings),
+      provider: loaded.providerSettings
     })
   }
 
@@ -367,7 +531,8 @@ export class BonziPluginSettingsStore {
       plugins: state,
       approvalsEnabled: loaded.approvalsEnabled,
       continuation: loaded.continuation,
-      character: toPersistedCharacterSettings(loaded.characterSettings)
+      character: toPersistedCharacterSettings(loaded.characterSettings),
+      provider: loaded.providerSettings
     })
 
     return this.getSettings(provider)
@@ -385,6 +550,9 @@ export class BonziPluginSettingsStore {
         approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
         continuation: DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation,
         characterSettings: getDefaultCharacterSettings(),
+        providerSettings: {},
+        routingSettings: { enabled: true, rules: [] },
+        routingWarnings: [],
         needsRewrite: false,
         fileExisted: false
       }
@@ -402,7 +570,9 @@ export class BonziPluginSettingsStore {
           plugins: withDefaults.inventory,
           approvalsEnabled: loaded.approvalsEnabled,
           continuation: loaded.continuation,
-          character: toPersistedCharacterSettings(loaded.characterSettings)
+          character: toPersistedCharacterSettings(loaded.characterSettings),
+          provider: loaded.providerSettings,
+          routing: loaded.routingSettings
         })
       }
 
@@ -411,6 +581,9 @@ export class BonziPluginSettingsStore {
         approvalsEnabled: loaded.approvalsEnabled,
         continuation: loaded.continuation,
         characterSettings: loaded.characterSettings,
+        providerSettings: loaded.providerSettings,
+        routingSettings: loaded.routingSettings,
+        routingWarnings: loaded.routingWarnings,
         needsRewrite,
         fileExisted: loaded.fileExisted
       }
@@ -422,7 +595,9 @@ export class BonziPluginSettingsStore {
         plugins: withDefaults.inventory,
         approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
         continuation: DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation,
-        character: toPersistedCharacterSettings(getDefaultCharacterSettings())
+        character: toPersistedCharacterSettings(getDefaultCharacterSettings()),
+        provider: {},
+        routing: { enabled: true, rules: [] }
       })
 
       return {
@@ -430,6 +605,9 @@ export class BonziPluginSettingsStore {
         approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
         continuation: DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation,
         characterSettings: getDefaultCharacterSettings(),
+        providerSettings: {},
+        routingSettings: { enabled: true, rules: [] },
+        routingWarnings: [],
         needsRewrite: true,
         fileExisted: true
       }
@@ -437,7 +615,32 @@ export class BonziPluginSettingsStore {
   }
 
   private writePersistedSettings(settings: PersistedSettingsFileV2): void {
+    const existing = this.readRawSettingsFile()
     mkdirSync(dirname(this.settingsPath), { recursive: true })
-    writeFileSync(this.settingsPath, JSON.stringify(settings, null, 2))
+    writeFileSync(
+      this.settingsPath,
+      JSON.stringify(
+        {
+          ...existing,
+          ...settings,
+          schemaVersion: 2
+        },
+        null,
+        2
+      )
+    )
+  }
+
+  private readRawSettingsFile(): Record<string, unknown> {
+    if (!existsSync(this.settingsPath)) {
+      return {}
+    }
+
+    try {
+      const parsed = JSON.parse(readFileSync(this.settingsPath, 'utf8'))
+      return isRecord(parsed) ? parsed : {}
+    } catch {
+      return {}
+    }
   }
 }

@@ -5,6 +5,9 @@ export const IPC_CHANNELS = {
   settings: {
     getElizaPlugins: 'settings:get-eliza-plugins',
     updateElizaPlugins: 'settings:update-eliza-plugins',
+    getAssistantProviderSettings: 'settings:get-assistant-provider-settings',
+    updateAssistantProviderSettings: 'settings:update-assistant-provider-settings',
+    listPiAiModelOptions: 'settings:list-pi-ai-model-options',
     getRuntimeApprovalSettings: 'settings:get-runtime-approval-settings',
     updateRuntimeApprovalSettings: 'settings:update-runtime-approval-settings',
     getElizaCharacterSettings: 'settings:get-eliza-character-settings',
@@ -16,7 +19,15 @@ export const IPC_CHANNELS = {
     getKnowledgeImportStatus: 'settings:get-knowledge-import-status',
     getWorkspaceSettings: 'settings:get-workspace-settings',
     selectWorkspaceFolder: 'settings:select-workspace-folder',
-    resetWorkspaceFolder: 'settings:reset-workspace-folder'
+    resetWorkspaceFolder: 'settings:reset-workspace-folder',
+    getHermesRuntimeSettings: 'settings:get-hermes-runtime-settings',
+    updateHermesRuntimeSettings: 'settings:update-hermes-runtime-settings',
+    getHermesModelAuthSettings: 'settings:get-hermes-model-auth-settings',
+    updateHermesModelAuthSettings: 'settings:update-hermes-model-auth-settings',
+    checkHermesModelAuthStatus: 'settings:check-hermes-model-auth-status',
+    checkHermesHealth: 'settings:check-hermes-health',
+    getRuntimeRoutingSettings: 'settings:get-runtime-routing-settings',
+    updateRuntimeRoutingSettings: 'settings:update-runtime-routing-settings'
   },
   plugins: {
     discover: 'plugins:discover',

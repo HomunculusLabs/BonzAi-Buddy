@@ -52,11 +52,8 @@ export async function buildRuntimePlugins(options: {
     )
   }
 
-  const providerPlugin =
-    options.config.effectiveProvider === 'openai-compatible'
-      ? (await import('@elizaos/plugin-openai')).default
-      : elizaClassicPlugin
-  const runtimePlugins: Plugin[] = [...plugins, providerPlugin]
+  const providerPlugins = await buildProviderPlugins(options.config)
+  const runtimePlugins: Plugin[] = [...plugins, ...providerPlugins]
 
   if (!options.pluginResolver) {
     return {
@@ -100,6 +97,53 @@ export async function applyRuntimeSettings(options: {
   runtime.setSetting('CHECK_SHOULD_RESPOND', false)
   runtime.setSetting('LOCALDB_DATA_DIR', dataDir)
 
+  if (config.effectiveProvider === 'pi-ai') {
+    const modelSpec =
+      config.piAi?.modelSpec ??
+      config.piAi?.largeModelSpec ??
+      config.piAi?.smallModelSpec
+
+    if (modelSpec) {
+      runtime.setSetting('MODEL_PROVIDER', modelSpec)
+    }
+
+    if (config.piAi?.agentDir) {
+      runtime.setSetting('PI_CODING_AGENT_DIR', config.piAi.agentDir)
+    }
+
+    if (config.piAi?.modelSpec) {
+      runtime.setSetting('PI_AI_MODEL_SPEC', config.piAi.modelSpec)
+    }
+
+    if (config.piAi?.smallModelSpec) {
+      runtime.setSetting('PI_AI_SMALL_MODEL_SPEC', config.piAi.smallModelSpec)
+    }
+
+    if (config.piAi?.largeModelSpec) {
+      runtime.setSetting('PI_AI_LARGE_MODEL_SPEC', config.piAi.largeModelSpec)
+    }
+
+    if (config.piAi?.priority) {
+      runtime.setSetting('PI_AI_PRIORITY', config.piAi.priority)
+    }
+
+    if (config.openai?.embedding) {
+      const embeddingRuntimeSettings = await resolveEmbeddingRuntimeSettings({
+        config,
+        embeddingsService
+      })
+      applyOpenAiEmbeddingRuntimeSettings(runtime, embeddingRuntimeSettings)
+      return embeddingRuntimeSettings?.warning ? [embeddingRuntimeSettings.warning] : []
+    }
+
+    await embeddingsService.stop()
+    return config.openai?.embedding
+      ? []
+      : [
+          'Pi AI does not provide TEXT_EMBEDDING. Configure BONZI_EMBEDDINGS_UPSTREAM_URL and BONZI_EMBEDDINGS_UPSTREAM_MODEL, or BONZI_OPENAI_EMBEDDING_* settings, to enable knowledge embeddings.'
+        ]
+  }
+
   if (config.effectiveProvider === 'openai-compatible' && config.openai) {
     runtime.setSetting('OPENAI_API_KEY', config.openai.apiKey, true)
     runtime.setSetting('OPENAI_BASE_URL', config.openai.baseUrl)
@@ -111,34 +155,7 @@ export async function applyRuntimeSettings(options: {
       embeddingsService
     })
 
-    if (embeddingRuntimeSettings?.model) {
-      runtime.setSetting(
-        'OPENAI_EMBEDDING_MODEL',
-        embeddingRuntimeSettings.model
-      )
-    }
-
-    if (embeddingRuntimeSettings?.baseUrl) {
-      runtime.setSetting(
-        'OPENAI_EMBEDDING_URL',
-        embeddingRuntimeSettings.baseUrl
-      )
-    }
-
-    if (embeddingRuntimeSettings?.apiKey) {
-      runtime.setSetting(
-        'OPENAI_EMBEDDING_API_KEY',
-        embeddingRuntimeSettings.apiKey,
-        true
-      )
-    }
-
-    if (embeddingRuntimeSettings?.dimensions !== undefined) {
-      runtime.setSetting(
-        'OPENAI_EMBEDDING_DIMENSIONS',
-        String(embeddingRuntimeSettings.dimensions)
-      )
-    }
+    applyOpenAiEmbeddingRuntimeSettings(runtime, embeddingRuntimeSettings)
 
     return embeddingRuntimeSettings?.warning ? [embeddingRuntimeSettings.warning] : []
   }
@@ -181,6 +198,15 @@ export function createRuntimeConfigSignature(options: {
       lifecycleStatus: plugin.lifecycleStatus,
       source: plugin.source
     })),
+    piAi: config.piAi
+      ? {
+          agentDir: config.piAi.agentDir ?? '',
+          modelSpec: config.piAi.modelSpec ?? '',
+          smallModelSpec: config.piAi.smallModelSpec ?? '',
+          largeModelSpec: config.piAi.largeModelSpec ?? '',
+          priority: config.piAi.priority ?? ''
+        }
+      : null,
     openai: config.openai
       ? {
           baseUrl: config.openai.baseUrl,
@@ -219,13 +245,106 @@ export function createRuntimeConfigSignature(options: {
   })
 }
 
+
+function applyOpenAiEmbeddingRuntimeSettings(
+  runtime: AgentRuntime,
+  embeddingRuntimeSettings: ResolvedEmbeddingRuntimeSettings | null
+): void {
+  if (embeddingRuntimeSettings?.model) {
+    runtime.setSetting(
+      'OPENAI_EMBEDDING_MODEL',
+      embeddingRuntimeSettings.model
+    )
+  }
+
+  if (embeddingRuntimeSettings?.baseUrl) {
+    runtime.setSetting(
+      'OPENAI_EMBEDDING_URL',
+      embeddingRuntimeSettings.baseUrl
+    )
+  }
+
+  if (embeddingRuntimeSettings?.apiKey) {
+    runtime.setSetting(
+      'OPENAI_EMBEDDING_API_KEY',
+      embeddingRuntimeSettings.apiKey,
+      true
+    )
+  }
+
+  if (embeddingRuntimeSettings?.dimensions !== undefined) {
+    runtime.setSetting(
+      'OPENAI_EMBEDDING_DIMENSIONS',
+      String(embeddingRuntimeSettings.dimensions)
+    )
+  }
+}
+
+async function buildProviderPlugins(
+  config: BonziElizaResolvedConfig
+): Promise<Plugin[]> {
+  if (config.effectiveProvider === 'openai-compatible') {
+    return [(await import('@elizaos/plugin-openai')).default]
+  }
+
+  if (config.effectiveProvider === 'pi-ai') {
+    const openAiPlugin = (await import('@elizaos/plugin-openai')).default
+    const piAiPlugin = (await import('@elizaos/plugin-pi-ai')).default as unknown as Plugin
+
+    // Keep Eliza Classic + OpenAI available for model types not handled by
+    // plugin-pi (notably TEXT_EMBEDDING/tokenizers). plugin-pi's high-priority
+    // handlers still win for text/object/image generation.
+    return [elizaClassicPlugin, openAiPlugin, createPiAiRuntimePlugin(piAiPlugin, config)]
+  }
+
+  return [elizaClassicPlugin]
+}
+
+function createPiAiRuntimePlugin(
+  plugin: Plugin,
+  config: BonziElizaResolvedConfig
+): Plugin {
+  return {
+    ...plugin,
+    config: buildPiAiPluginConfig(config)
+  } as Plugin
+}
+
+function buildPiAiPluginConfig(
+  config: BonziElizaResolvedConfig
+): Record<string, string> {
+  const pluginConfig: Record<string, string> = {}
+
+  if (config.piAi?.agentDir) {
+    pluginConfig.PI_CODING_AGENT_DIR = config.piAi.agentDir
+  }
+
+  if (config.piAi?.modelSpec) {
+    pluginConfig.PI_AI_MODEL_SPEC = config.piAi.modelSpec
+  }
+
+  if (config.piAi?.smallModelSpec) {
+    pluginConfig.PI_AI_SMALL_MODEL_SPEC = config.piAi.smallModelSpec
+  }
+
+  if (config.piAi?.largeModelSpec) {
+    pluginConfig.PI_AI_LARGE_MODEL_SPEC = config.piAi.largeModelSpec
+  }
+
+  if (config.piAi?.priority) {
+    pluginConfig.PI_AI_PRIORITY = config.piAi.priority
+  }
+
+  return pluginConfig
+}
+
 async function resolveEmbeddingRuntimeSettings(options: {
   config: BonziElizaResolvedConfig
   embeddingsService: BonziExternalEmbeddingsService
 }): Promise<ResolvedEmbeddingRuntimeSettings | null> {
   const { config, embeddingsService } = options
 
-  if (config.effectiveProvider !== 'openai-compatible' || !config.openai) {
+  if (!config.openai) {
     await embeddingsService.stop()
     return null
   }

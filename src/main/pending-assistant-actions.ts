@@ -13,6 +13,7 @@ import { createPendingAssistantAction } from './assistant-action-presentation'
 import type { DiscordBrowserActionService } from './discord-browser-service'
 import type { BonziWorkspaceFileService } from './bonzi-workspace-file-service'
 import type { BonziProposedAction } from './eliza/runtime-manager'
+import type { HermesSecondaryRuntimeService } from './hermes/hermes-secondary-runtime-service'
 
 interface PendingAssistantActionsOptions {
   getShellState: () => ShellState
@@ -20,6 +21,7 @@ interface PendingAssistantActionsOptions {
   getApprovalSettings: () => RuntimeApprovalSettings
   discordBrowserService: DiscordBrowserActionService
   workspaceFileService: BonziWorkspaceFileService
+  hermesService?: Pick<HermesSecondaryRuntimeService, 'runConsultation' | 'inspectCronJobs'>
   linkExternalAction: (action: AssistantAction) => void
   markExternalActionRunning: (action: AssistantAction) => void
   onActionUpdated: (action: AssistantAction) => void
@@ -43,6 +45,7 @@ interface PendingActionExecutionEnvironment {
   getCompanionWindow: () => BrowserWindow | null
   discordBrowserService: DiscordBrowserActionService
   workspaceFileService: BonziWorkspaceFileService
+  hermesService?: Pick<HermesSecondaryRuntimeService, 'runConsultation' | 'inspectCronJobs'>
 }
 
 interface PendingActionWorkflowHooks {
@@ -101,7 +104,8 @@ class PendingAssistantActionRunner {
         shellState: this.environment.getShellState(),
         companionWindow: this.environment.getCompanionWindow(),
         discordBrowserService: this.environment.discordBrowserService,
-        workspaceFileService: this.environment.workspaceFileService
+        workspaceFileService: this.environment.workspaceFileService,
+        hermesService: this.environment.hermesService
       })
 
       return this.finish({
@@ -181,7 +185,8 @@ export class PendingAssistantActions {
         getShellState: options.getShellState,
         getCompanionWindow: options.getCompanionWindow,
         discordBrowserService: options.discordBrowserService,
-        workspaceFileService: options.workspaceFileService
+        workspaceFileService: options.workspaceFileService,
+        hermesService: options.hermesService
       },
       {
         markExternalActionRunning: options.markExternalActionRunning,
@@ -250,7 +255,7 @@ export class PendingAssistantActions {
     return {
       ok: executed.action.status === 'completed',
       action: executed.action,
-      message: executed.action.resultMessage ?? 'Action finished.',
+      message: formatActionExecutionMessage(executed.action),
       confirmationRequired: false,
       continuationScheduled: executed.continuationScheduled,
       workflowRun: executed.workflowRun
@@ -324,4 +329,34 @@ export class PendingAssistantActions {
 
 function requiresNonBypassableConfirmation(action: AssistantAction): boolean {
   return action.type === 'workspace-write-file'
+}
+
+function formatActionExecutionMessage(action: AssistantAction): string {
+  if (action.type !== 'hermes-run') {
+    return action.resultMessage ?? 'Action finished.'
+  }
+
+  if (action.status === 'completed') {
+    return 'Hermes consultation completed. Eliza is synthesizing the final answer.'
+  }
+
+  if (action.status === 'failed') {
+    const detail = summarizeForDisplay(action.resultMessage ?? '', 400)
+    return detail
+      ? `Hermes consultation failed: ${detail}`
+      : 'Hermes consultation failed.'
+  }
+
+  return action.resultMessage ?? 'Hermes consultation finished.'
+}
+
+function summarizeForDisplay(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/gu, ' ').trim()
+  if (!normalized) {
+    return ''
+  }
+
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`
+    : normalized
 }

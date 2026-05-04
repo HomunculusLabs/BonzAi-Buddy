@@ -1,11 +1,13 @@
 import type {
   AssistantProviderInfo,
   ElizaCharacterSettings,
+  PersistedAssistantProviderSettings,
   ElizaOptionalPluginId,
   ElizaPluginExecutionPolicy,
   ElizaPluginLifecycleStatus,
   ElizaPluginSource,
-  RuntimeContinuationSettings
+  RuntimeContinuationSettings,
+  RuntimeRoutingSettings
 } from '../../shared/contracts'
 
 export interface SanitizedBonziMessageExample {
@@ -99,6 +101,8 @@ export interface PersistedSettingsFileV2 {
   approvalsEnabled?: boolean
   continuation?: PersistedRuntimeContinuationSettings
   character?: PersistedCharacterSettings
+  provider?: PersistedAssistantProviderSettings
+  routing?: RuntimeRoutingSettings
 }
 
 export interface PersistedSettingsFileLegacy {
@@ -115,11 +119,19 @@ export interface LoadedSettingsState {
   approvalsEnabled: boolean
   continuation: RuntimeContinuationSettings
   characterSettings: NormalizedCharacterSettings
+  providerSettings: PersistedAssistantProviderSettings
+  routingSettings: RuntimeRoutingSettings
+  routingWarnings: string[]
   needsRewrite: boolean
   fileExisted: boolean
 }
 
 export const SETTINGS_FILE_NAME = 'bonzi-settings.json'
+
+export const DEFAULT_RUNTIME_ROUTING_SETTINGS: RuntimeRoutingSettings = {
+  enabled: true,
+  rules: []
+}
 
 export const DEFAULT_CHARACTER_SETTINGS: NormalizedCharacterSettings = {
   enabled: false,
@@ -166,5 +178,6 @@ export const DEFAULT_PLUGIN_RUNTIME_SETTINGS: BonziElizaPluginRuntimeSettings = 
 
 export const PROVIDER_PACKAGE_NAMES: Record<AssistantProviderInfo['kind'], string> = {
   'eliza-classic': '@elizaos/plugin-eliza-classic',
-  'openai-compatible': '@elizaos/plugin-openai'
+  'openai-compatible': '@elizaos/plugin-openai',
+  'pi-ai': '@elizaos/plugin-pi-ai'
 }

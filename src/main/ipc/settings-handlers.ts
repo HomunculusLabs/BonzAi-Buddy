@@ -27,6 +27,24 @@ export function registerSettingsIpcHandlers({
     }
   )
 
+  handleInvoke(IPC_CHANNELS.settings.getAssistantProviderSettings, () => {
+    return assistantService.getAssistantProviderSettings()
+  })
+
+  handleInvoke(
+    IPC_CHANNELS.settings.updateAssistantProviderSettings,
+    async (_event, request) => {
+      return assistantService.updateAssistantProviderSettings(request)
+    }
+  )
+
+  handleInvoke(
+    IPC_CHANNELS.settings.listPiAiModelOptions,
+    async (_event, request) => {
+      return assistantService.listPiAiModelOptions(request)
+    }
+  )
+
   handleInvoke(IPC_CHANNELS.settings.getRuntimeApprovalSettings, () => {
     return assistantService.getRuntimeApprovalSettings()
   })
@@ -201,6 +219,47 @@ export function registerSettingsIpcHandlers({
       }
     }
   })
+
+  handleInvoke(IPC_CHANNELS.settings.getHermesRuntimeSettings, async () => {
+    return assistantService.getHermesRuntimeSettings()
+  })
+
+  handleInvoke(
+    IPC_CHANNELS.settings.updateHermesRuntimeSettings,
+    async (_event, request) => {
+      return assistantService.updateHermesRuntimeSettings(request)
+    }
+  )
+
+  handleInvoke(IPC_CHANNELS.settings.getHermesModelAuthSettings, async () => {
+    return assistantService.getHermesModelAuthSettings()
+  })
+
+  handleInvoke(
+    IPC_CHANNELS.settings.updateHermesModelAuthSettings,
+    async (_event, request) => {
+      return assistantService.updateHermesModelAuthSettings(request)
+    }
+  )
+
+  handleInvoke(IPC_CHANNELS.settings.checkHermesModelAuthStatus, async () => {
+    return assistantService.checkHermesModelAuthStatus()
+  })
+
+  handleInvoke(IPC_CHANNELS.settings.checkHermesHealth, async (_event, request) => {
+    return assistantService.checkHermesHealth(request)
+  })
+
+  handleInvoke(IPC_CHANNELS.settings.getRuntimeRoutingSettings, () => {
+    return assistantService.getRuntimeRoutingSettings()
+  })
+
+  handleInvoke(
+    IPC_CHANNELS.settings.updateRuntimeRoutingSettings,
+    async (_event, request) => {
+      return assistantService.updateRuntimeRoutingSettings(request)
+    }
+  )
 
   handleInvoke(IPC_CHANNELS.settings.resetWorkspaceFolder, async () => {
     try {

@@ -6,10 +6,38 @@ import {
 import { handleInvoke, isFiniteNumber, onSend } from './ipc-handler-utils'
 
 const MAIN_MOUSE_IGNORE_FAILSAFE_MS = 750
+const MAX_SAFE_WINDOW_COORDINATE = 100_000
 const mouseIgnoreResetTimers = new WeakMap<
   BrowserWindow,
   ReturnType<typeof setTimeout>
 >()
+
+
+function normalizeWindowCoordinate(value: unknown): number | null {
+  if (!isFiniteNumber(value)) {
+    return null
+  }
+
+  const rounded = Math.round(value)
+
+  if (!Number.isSafeInteger(rounded)) {
+    return null
+  }
+
+  return Math.max(
+    -MAX_SAFE_WINDOW_COORDINATE,
+    Math.min(MAX_SAFE_WINDOW_COORDINATE, rounded)
+  )
+}
+
+function safelyMutateWindow(action: () => void): void {
+  try {
+    action()
+  } catch {
+    // Ignore malformed/stale renderer window mutation requests. Native Electron
+    // conversion errors from setPosition/setBounds should not crash main.
+  }
+}
 
 function clearMouseIgnoreResetTimer(targetWindow: BrowserWindow): void {
   const timer = mouseIgnoreResetTimers.get(targetWindow)
@@ -29,11 +57,11 @@ function applyMouseEventsIgnored(
   clearMouseIgnoreResetTimer(targetWindow)
 
   if (!ignored) {
-    targetWindow.setIgnoreMouseEvents(false)
+    safelyMutateWindow(() => targetWindow.setIgnoreMouseEvents(false))
     return
   }
 
-  targetWindow.setIgnoreMouseEvents(true, { forward: true })
+  safelyMutateWindow(() => targetWindow.setIgnoreMouseEvents(true, { forward: true }))
 
   const timer = setTimeout(() => {
     mouseIgnoreResetTimers.delete(targetWindow)
@@ -42,7 +70,7 @@ function applyMouseEventsIgnored(
       return
     }
 
-    targetWindow.setIgnoreMouseEvents(false)
+    safelyMutateWindow(() => targetWindow.setIgnoreMouseEvents(false))
   }, MAIN_MOUSE_IGNORE_FAILSAFE_MS)
 
   mouseIgnoreResetTimers.set(targetWindow, timer)
@@ -88,12 +116,14 @@ export function registerWindowIpcHandlers(): void {
 
   onSend(IPC_CHANNELS.window.setPosition, (event, x, y) => {
     const targetWindow = BrowserWindow.fromWebContents(event.sender)
+    const nextX = normalizeWindowCoordinate(x)
+    const nextY = normalizeWindowCoordinate(y)
 
-    if (!targetWindow || !isFiniteNumber(x) || !isFiniteNumber(y)) {
+    if (!targetWindow || nextX === null || nextY === null) {
       return
     }
 
-    targetWindow.setPosition(Math.round(x), Math.round(y))
+    safelyMutateWindow(() => targetWindow.setPosition(nextX, nextY))
   })
 
   onSend(IPC_CHANNELS.window.setMouseEventsIgnored, (event, ignored) => {
@@ -127,6 +157,6 @@ export function registerWindowIpcHandlers(): void {
       Math.min(Math.round(bounds.y), workArea.y + workArea.height - height)
     )
 
-    targetWindow.setBounds({ x, y, width, height })
+    safelyMutateWindow(() => targetWindow.setBounds({ x, y, width, height }))
   })
 }

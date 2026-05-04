@@ -18,6 +18,7 @@ const filamentCenterScratch = new THREE.Vector3()
 
 interface JellyfishTentacleMaterials {
   filamentMaterial: THREE.LineBasicMaterial
+  heroTentacleMaterial: THREE.MeshBasicMaterial
   oralArmMaterial: THREE.MeshBasicMaterial
   tentacleRibbonMaterial: THREE.MeshBasicMaterial
 }
@@ -40,9 +41,10 @@ export function createJellyfishTentacles(input: {
     geometry.setIndex(createRibbonIndices(segmentCount))
     geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, -0.62, 0), 1.45)
 
-    const ribbon = new THREE.Mesh(geometry, materials.tentacleRibbonMaterial)
-    ribbon.name = 'Jellyfish translucent ribbon tentacle'
-    ribbon.renderOrder = 14
+    const isHero = index % 4 === 0
+    const ribbon = new THREE.Mesh(geometry, isHero ? materials.heroTentacleMaterial : materials.tentacleRibbonMaterial)
+    ribbon.name = isHero ? 'Jellyfish hero tendril' : 'Jellyfish translucent ribbon tentacle'
+    ribbon.renderOrder = isHero ? 16 : 14
     tentacleRoot.add(ribbon)
 
     tentacles.push({
@@ -54,10 +56,10 @@ export function createJellyfishTentacles(input: {
       phase: index * 0.82,
       positions,
       segmentCount,
-      style: index % 4 === 0 ? 'hero' : 'ribbon',
-      tipWidth: index % 4 === 0 ? 0.0045 : 0.0025 + (index % 3) * 0.001,
-      waveScale: index % 4 === 0 ? 0.74 : 0.48 + (index % 4) * 0.07,
-      width: index % 4 === 0 ? 0.032 : 0.017 + (index % 4) * 0.0045
+      style: isHero ? 'hero' : 'ribbon',
+      tipWidth: isHero ? 0.0045 : 0.0025 + (index % 3) * 0.001,
+      waveScale: isHero ? 0.74 : 0.48 + (index % 4) * 0.07,
+      width: isHero ? 0.032 : 0.017 + (index % 4) * 0.0045
     })
   }
 
@@ -73,7 +75,7 @@ export function createJellyfishTentacles(input: {
 
     const oralArm = new THREE.Mesh(geometry, materials.oralArmMaterial)
     oralArm.name = 'Jellyfish curled oral arm'
-    oralArm.renderOrder = 18
+    oralArm.renderOrder = 20
     oralCoreGroup.add(oralArm)
 
     tentacles.push({

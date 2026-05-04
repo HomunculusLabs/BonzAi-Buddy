@@ -20,12 +20,14 @@ import {
 } from './assistant-action-param-utils'
 import { describeImageWithVision } from './vision-client'
 import type { BonziWorkspaceFileService } from './bonzi-workspace-file-service'
+import type { HermesSecondaryRuntimeService } from './hermes/hermes-secondary-runtime-service'
 
 interface AssistantActionExecutorDeps {
   shellState: ShellState
   companionWindow: BrowserWindow | null
   discordBrowserService: DiscordBrowserActionService
   workspaceFileService: BonziWorkspaceFileService
+  hermesService?: Pick<HermesSecondaryRuntimeService, 'runConsultation' | 'inspectCronJobs'>
 }
 
 export interface WorkflowBonziDesktopActionProposal {
@@ -104,8 +106,15 @@ export async function executeAssistantAction(
       await shell.openExternal(target.url.toString())
       return `Opened a web search for: ${target.query}`
     }
+    case 'surf-browser-read':
+    case 'surf-browser-action':
+      throw new Error(`${action.type} is not wired in this Bonzi build yet.`)
     case 'cua-check-status':
       return checkCuaDriverStatus()
+    case 'hermes-run':
+      return runHermesConsultation(action, deps)
+    case 'inspect-cron-jobs':
+      return inspectHermesCronJobs(action, deps)
     case 'discord-snapshot':
       return snapshotDiscordState(action.params?.query)
     case 'discord-read-context':
@@ -138,6 +147,67 @@ export async function executeAssistantAction(
     default:
       return assertNever(action.type)
   }
+}
+
+async function runHermesConsultation(
+  action: AssistantAction,
+  deps: AssistantActionExecutorDeps
+): Promise<string> {
+  const prompt = normalizeText(action.params?.prompt)
+
+  if (!prompt) {
+    throw new Error('Hermes consultation requires a non-empty prompt.')
+  }
+
+  if (!deps.hermesService) {
+    return [
+      'Hermes secondary consultation failed.',
+      'Eliza remains the primary orchestrator and should continue without treating Hermes output as authoritative.',
+      'Failure: Hermes secondary runtime service is unavailable.'
+    ].join('\n')
+  }
+
+  try {
+    const result = await deps.hermesService.runConsultation({
+      prompt,
+      workflowRunId: action.workflowRunId,
+      actionId: action.id
+    })
+    const warningText = result.warnings.length > 0
+      ? `\n\nHermes warnings:\n${result.warnings.map((warning) => `- ${truncate(warning, 500)}`).join('\n')}`
+      : ''
+
+    return `${result.text}${warningText}`
+  } catch (error) {
+    return formatHermesFailureObservation('Hermes secondary consultation', error)
+  }
+}
+
+async function inspectHermesCronJobs(
+  action: AssistantAction,
+  deps: AssistantActionExecutorDeps
+): Promise<string> {
+  if (!deps.hermesService) {
+    return [
+      'Hermes cron inspection failed.',
+      'Eliza remains the primary orchestrator and should continue without treating Hermes output as authoritative.',
+      'Failure: Hermes secondary runtime service is unavailable.'
+    ].join('\n')
+  }
+
+  try {
+    return await deps.hermesService.inspectCronJobs(action.params?.query)
+  } catch (error) {
+    return formatHermesFailureObservation('Hermes cron inspection', error)
+  }
+}
+
+function formatHermesFailureObservation(operation: string, error: unknown): string {
+  return [
+    `${operation} failed.`,
+    'Eliza remains the primary orchestrator and should continue without treating Hermes output as authoritative.',
+    `Failure: ${error instanceof Error ? error.message : String(error)}`
+  ].join('\n')
 }
 
 async function readDiscordScreenshotWithVision(query: string | undefined): Promise<string> {

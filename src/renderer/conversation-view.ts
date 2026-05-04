@@ -229,6 +229,42 @@ function renderWorkflowRun(
   `
 }
 
+function renderActionResult(action: AssistantAction): string {
+  const result = formatActionResultForDisplay(action)
+  return result ? `<p class="action-chip__result">${escapeHtml(result)}</p>` : ''
+}
+
+function formatActionResultForDisplay(action: AssistantAction): string {
+  if (!action.resultMessage) {
+    return ''
+  }
+
+  if (action.type !== 'hermes-run') {
+    return action.resultMessage
+  }
+
+  if (action.status === 'completed') {
+    return 'Hermes observation captured. Eliza is preparing the final answer.'
+  }
+
+  if (action.status === 'failed') {
+    return summarizeForDisplay(action.resultMessage, 400)
+  }
+
+  return ''
+}
+
+function summarizeForDisplay(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/gu, ' ').trim()
+  if (!normalized) {
+    return ''
+  }
+
+  return normalized.length > maxLength
+    ? `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`
+    : normalized
+}
+
 export function getActiveConversationEntry(
   entries: ConversationEntry[]
 ): ConversationEntry | null {
@@ -351,7 +387,7 @@ export function renderConversation(
                     <strong>${escapeHtml(action.title)}</strong>
                     <p>${escapeHtml(action.description)}</p>
                     <span class="action-chip__status">${escapeHtml(action.status)}</span>
-                    ${action.resultMessage ? `<p class="action-chip__result">${escapeHtml(action.resultMessage)}</p>` : ''}
+                    ${renderActionResult(action)}
                   </div>
                   <button
                     class="ghost-button"

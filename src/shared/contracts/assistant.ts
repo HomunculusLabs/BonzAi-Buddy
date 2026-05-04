@@ -1,6 +1,6 @@
 import type { BonziWorkflowRunSnapshot } from './workflow'
 
-export type AssistantProviderKind = 'eliza-classic' | 'openai-compatible'
+export type AssistantProviderKind = 'eliza-classic' | 'openai-compatible' | 'pi-ai'
 
 export interface AssistantProviderInfo {
   kind: AssistantProviderKind
@@ -13,6 +13,8 @@ export interface AssistantRuntimeStatus {
   persistence: 'localdb'
   lastError?: string
 }
+
+export type AssistantRuntimeLifecycleState = AssistantRuntimeStatus['state']
 
 export type AssistantMessageRole = 'user' | 'assistant' | 'system'
 
@@ -30,7 +32,11 @@ export const ASSISTANT_ACTION_TYPES = [
   'close-window',
   'open-url',
   'search-web',
+  'surf-browser-read',
+  'surf-browser-action',
   'cua-check-status',
+  'hermes-run',
+  'inspect-cron-jobs',
   'discord-snapshot',
   'discord-read-context',
   'discord-read-screenshot',
@@ -53,6 +59,9 @@ export type AssistantActionStatus =
 export interface AssistantActionParams {
   url?: string
   query?: string
+  prompt?: string
+  surfCommand?: string
+  surfArgs?: string[]
   direction?: 'up' | 'down'
   amount?: number
   text?: string

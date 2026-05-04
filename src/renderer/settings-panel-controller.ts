@@ -2,23 +2,23 @@ import type { RuntimeApprovalSettings } from '../shared/contracts/approvals'
 import type { ElizaPluginSettings } from '../shared/contracts/plugins'
 import type { ShellState } from '../shared/contracts/shell'
 import type { MountedAppElements } from './app-dom'
+import type { HydratePluginSettingsOptions } from './plugin-settings-controller'
 import {
-  createPluginSettingsController,
-  type HydratePluginSettingsOptions
-} from './plugin-settings-controller'
-import { createApprovalSettingsController } from './approval-settings-controller'
-import { createCharacterSettingsController } from './character-settings-controller'
-import { createKnowledgeSettingsController } from './knowledge-settings-controller'
-import { createSettingsStatusController } from './settings-status-controller'
-import { createWorkspaceSettingsController } from './workspace-settings-controller'
+  createSettingsManagementSurface,
+  type SettingsManagementSurface
+} from './settings-management-surface'
+import { createSettingsTabsController } from './settings-tabs-controller'
 
 export interface SettingsPanelController {
   setVisible(visible: boolean): void
   toggleVisible(): void
+  hydrateProviderSettings(): Promise<void>
   hydratePluginSettings(options?: HydratePluginSettingsOptions): Promise<void>
   hydrateApprovalSettings(): Promise<void>
   hydrateCharacterSettings(): Promise<void>
   hydrateKnowledgeSettings(): Promise<void>
+  hydrateHermesSettings(): Promise<void>
+  hydrateRoutingSettings(): Promise<void>
   setPluginSettings(settings: ElizaPluginSettings | null): void
   syncApprovalSettings(settings: RuntimeApprovalSettings | null): void
   getApprovalSettings(): RuntimeApprovalSettings | null
@@ -33,9 +33,12 @@ export interface SettingsPanelControllerOptions {
     | 'settingsButton'
     | 'settingsCloseButton'
     | 'settingsPanelEl'
+    | 'providerSettingsEl'
     | 'characterSettingsEl'
     | 'knowledgeSettingsEl'
     | 'workspaceSettingsEl'
+    | 'hermesSettingsEl'
+    | 'routingSettingsEl'
     | 'approvalSettingsEl'
     | 'pluginSettingsEl'
     | 'settingsStatusEl'
@@ -49,21 +52,15 @@ export interface SettingsPanelControllerOptions {
   onConversationNeedsRender(): void
 }
 
-type SettingsTabId = 'general' | 'approvals' | 'character' | 'knowledge' | 'plugins'
-
-const SETTINGS_TAB_IDS: SettingsTabId[] = [
+const COMPANION_SETTINGS_TAB_IDS = [
   'general',
   'approvals',
   'character',
   'knowledge',
+  'hermes',
+  'routing',
   'plugins'
-]
-
-function normalizeSettingsTabId(value: string | undefined): SettingsTabId {
-  return SETTINGS_TAB_IDS.includes(value as SettingsTabId)
-    ? (value as SettingsTabId)
-    : 'general'
-}
+] as const
 
 export function createSettingsPanelController(
   options: SettingsPanelControllerOptions
@@ -72,9 +69,12 @@ export function createSettingsPanelController(
     settingsButton,
     settingsCloseButton,
     settingsPanelEl,
+    providerSettingsEl,
     characterSettingsEl,
     knowledgeSettingsEl,
     workspaceSettingsEl,
+    hermesSettingsEl,
+    routingSettingsEl,
     approvalSettingsEl,
     pluginSettingsEl,
     settingsStatusEl,
@@ -83,149 +83,31 @@ export function createSettingsPanelController(
   } = options.elements
 
   let isSettingsVisible = false
-  let activeSettingsTab: SettingsTabId = 'general'
 
-  const tabButtons = Array.from(
-    settingsPanelEl.querySelectorAll<HTMLButtonElement>('[data-settings-tab]')
-  )
-  const tabPanes = Array.from(
-    settingsPanelEl.querySelectorAll<HTMLElement>('[data-settings-pane]')
-  )
-
-  const statusController = createSettingsStatusController({
-    settingsStatusEl,
-    applyRuntimeChangesButton
-  })
-
-  const approvalController = createApprovalSettingsController({
-    approvalSettingsEl,
-    setStatusMessage: statusController.setStatusMessage,
+  const settingsSurface: SettingsManagementSurface = createSettingsManagementSurface({
+    elements: {
+      providerSettingsEl,
+      characterSettingsEl,
+      knowledgeSettingsEl,
+      workspaceSettingsEl,
+      hermesSettingsEl,
+      routingSettingsEl,
+      approvalSettingsEl,
+      pluginSettingsEl,
+      settingsStatusEl,
+      applyRuntimeChangesButton
+    },
     onApplyShellState: options.onApplyShellState,
     onApprovalSettingsChanged: options.onApprovalSettingsChanged,
     onApprovalsDisabled: options.onApprovalsDisabled,
-    onConversationNeedsRender: options.onConversationNeedsRender,
-    onSavingChange: statusController.setApprovalSaving
+    onConversationNeedsRender: options.onConversationNeedsRender
   })
 
-  const characterController = createCharacterSettingsController({
-    characterSettingsEl,
-    setStatusMessage: statusController.setStatusMessage,
-    setRuntimeReloadPending: statusController.setRuntimeReloadPending,
-    onSavingChange: statusController.setCharacterSaving
+  const tabsController = createSettingsTabsController({
+    rootEl: settingsPanelEl,
+    tabIds: COMPANION_SETTINGS_TAB_IDS,
+    defaultTabId: 'general'
   })
-
-  const knowledgeController = createKnowledgeSettingsController({
-    knowledgeSettingsEl,
-    setStatusMessage: statusController.setStatusMessage,
-    onSavingChange: statusController.setKnowledgeSaving
-  })
-
-  const workspaceController = createWorkspaceSettingsController({
-    workspaceSettingsEl,
-    setStatusMessage: statusController.setStatusMessage,
-    onApplyShellState: options.onApplyShellState,
-    onSavingChange: statusController.setWorkspaceSaving
-  })
-
-  const pluginController = createPluginSettingsController({
-    pluginSettingsEl,
-    getApprovalsEnabled: approvalController.isApprovalsEnabled,
-    setStatusMessage: statusController.setStatusMessage,
-    setRuntimeReloadPending: statusController.setRuntimeReloadPending,
-    onApplyShellState: options.onApplyShellState,
-    onSavingChange: statusController.setPluginSaving
-  })
-
-  const setActiveSettingsTab = (
-    tabId: SettingsTabId,
-    tabOptions: { focus?: boolean } = {}
-  ): void => {
-    activeSettingsTab = tabId
-
-    for (const button of tabButtons) {
-      const buttonTabId = normalizeSettingsTabId(button.dataset.settingsTab)
-      const isSelected = buttonTabId === activeSettingsTab
-      button.setAttribute('aria-selected', String(isSelected))
-      button.tabIndex = isSelected ? 0 : -1
-
-      if (isSelected && tabOptions.focus) {
-        button.focus()
-      }
-    }
-
-    for (const pane of tabPanes) {
-      const paneTabId = normalizeSettingsTabId(pane.dataset.settingsPane)
-      pane.hidden = paneTabId !== activeSettingsTab
-    }
-  }
-
-  const focusActiveTabSoon = (): void => {
-    window.requestAnimationFrame(() => {
-      if (!isSettingsVisible) {
-        return
-      }
-
-      setActiveSettingsTab(activeSettingsTab, { focus: true })
-    })
-  }
-
-  const handleSettingsTabClick = (event: MouseEvent): void => {
-    const target = event.target
-
-    if (!(target instanceof Element)) {
-      return
-    }
-
-    const tabButton = target.closest<HTMLButtonElement>('[data-settings-tab]')
-
-    if (!tabButton) {
-      return
-    }
-
-    setActiveSettingsTab(normalizeSettingsTabId(tabButton.dataset.settingsTab), {
-      focus: true
-    })
-  }
-
-  const handleSettingsTabKeydown = (event: KeyboardEvent): void => {
-    const target = event.target
-
-    if (!(target instanceof HTMLButtonElement) || !target.matches('[data-settings-tab]')) {
-      return
-    }
-
-    const currentIndex = tabButtons.indexOf(target)
-    if (currentIndex < 0) {
-      return
-    }
-
-    let nextIndex: number | null = null
-
-    switch (event.key) {
-      case 'ArrowRight':
-      case 'ArrowDown':
-        nextIndex = (currentIndex + 1) % tabButtons.length
-        break
-      case 'ArrowLeft':
-      case 'ArrowUp':
-        nextIndex = (currentIndex - 1 + tabButtons.length) % tabButtons.length
-        break
-      case 'Home':
-        nextIndex = 0
-        break
-      case 'End':
-        nextIndex = tabButtons.length - 1
-        break
-      default:
-        return
-    }
-
-    event.preventDefault()
-    const nextButton = tabButtons[nextIndex]
-    setActiveSettingsTab(normalizeSettingsTabId(nextButton.dataset.settingsTab), {
-      focus: true
-    })
-  }
 
   const setSettingsVisible = (
     visible: boolean,
@@ -240,13 +122,9 @@ export function createSettingsPanelController(
     shellEl.classList.toggle('shell--settings-open', visible)
 
     if (visible) {
-      setActiveSettingsTab(activeSettingsTab)
-      focusActiveTabSoon()
-      void approvalController.hydrateApprovalSettings()
-      void characterController.hydrate()
-      void workspaceController.hydrate()
-      void knowledgeController.hydrate()
-      void pluginController.hydrate()
+      tabsController.setActiveTab(tabsController.getActiveTab())
+      tabsController.focusActiveTabSoon(() => isSettingsVisible)
+      settingsSurface.hydrateAll()
     }
   }
 
@@ -259,65 +137,31 @@ export function createSettingsPanelController(
     setSettingsVisible(false)
   }
 
-  const handleApplyRuntimeChangesClick = async (): Promise<void> => {
-    if (!window.bonzi || statusController.isApplyingRuntimeChanges()) {
-      return
-    }
-
-    statusController.setApplyingRuntimeChanges(true)
-    statusController.setStatusMessage('Reloading elizaOS runtime…')
-
-    try {
-      await window.bonzi.assistant.reloadRuntime()
-      statusController.setRuntimeReloadPending(false)
-      statusController.setStatusMessage('Runtime reload complete.')
-      const nextShellState = await window.bonzi.app.getShellState()
-      options.onApplyShellState(nextShellState)
-    } catch (error) {
-      statusController.setStatusMessage(`Runtime reload failed: ${String(error)}`)
-    } finally {
-      statusController.setApplyingRuntimeChanges(false)
-    }
-  }
-
-  setActiveSettingsTab(activeSettingsTab)
   settingsButton.addEventListener('click', handleSettingsButtonClick)
   settingsCloseButton.addEventListener('click', handleSettingsCloseButtonClick)
-  settingsPanelEl.addEventListener('click', handleSettingsTabClick)
-  settingsPanelEl.addEventListener('keydown', handleSettingsTabKeydown)
-  applyRuntimeChangesButton.addEventListener(
-    'click',
-    handleApplyRuntimeChangesClick
-  )
 
   return {
     setVisible: setSettingsVisible,
     toggleVisible: () => {
       setSettingsVisible(!isSettingsVisible)
     },
-    hydratePluginSettings: (hydrateOptions) => pluginController.hydrate(hydrateOptions),
-    hydrateApprovalSettings: approvalController.hydrateApprovalSettings,
-    hydrateCharacterSettings: characterController.hydrate,
-    hydrateKnowledgeSettings: knowledgeController.hydrate,
-    setPluginSettings: pluginController.setPluginSettings,
-    syncApprovalSettings: approvalController.syncApprovalSettings,
-    getApprovalSettings: approvalController.getApprovalSettings,
-    isApprovalsEnabled: approvalController.isApprovalsEnabled,
-    setRuntimeReloadPending: statusController.setRuntimeReloadPending,
+    hydrateProviderSettings: settingsSurface.hydrateProviderSettings,
+    hydratePluginSettings: settingsSurface.hydratePluginSettings,
+    hydrateApprovalSettings: settingsSurface.hydrateApprovalSettings,
+    hydrateCharacterSettings: settingsSurface.hydrateCharacterSettings,
+    hydrateKnowledgeSettings: settingsSurface.hydrateKnowledgeSettings,
+    hydrateHermesSettings: settingsSurface.hydrateHermesSettings,
+    hydrateRoutingSettings: settingsSurface.hydrateRoutingSettings,
+    setPluginSettings: settingsSurface.setPluginSettings,
+    syncApprovalSettings: settingsSurface.syncApprovalSettings,
+    getApprovalSettings: settingsSurface.getApprovalSettings,
+    isApprovalsEnabled: settingsSurface.isApprovalsEnabled,
+    setRuntimeReloadPending: settingsSurface.setRuntimeReloadPending,
     dispose: () => {
       settingsButton.removeEventListener('click', handleSettingsButtonClick)
       settingsCloseButton.removeEventListener('click', handleSettingsCloseButtonClick)
-      settingsPanelEl.removeEventListener('click', handleSettingsTabClick)
-      settingsPanelEl.removeEventListener('keydown', handleSettingsTabKeydown)
-      applyRuntimeChangesButton.removeEventListener(
-        'click',
-        handleApplyRuntimeChangesClick
-      )
-      pluginController.dispose()
-      workspaceController.dispose()
-      knowledgeController.dispose()
-      characterController.dispose()
-      approvalController.dispose()
+      tabsController.dispose()
+      settingsSurface.dispose()
     }
   }
 }

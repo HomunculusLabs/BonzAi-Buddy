@@ -61,6 +61,12 @@ const bonziApi = {
     getElizaPlugins: () => invoke(IPC_CHANNELS.settings.getElizaPlugins),
     updateElizaPlugins: (request) =>
       invoke(IPC_CHANNELS.settings.updateElizaPlugins, request),
+    getAssistantProviderSettings: () =>
+      invoke(IPC_CHANNELS.settings.getAssistantProviderSettings),
+    updateAssistantProviderSettings: (request) =>
+      invoke(IPC_CHANNELS.settings.updateAssistantProviderSettings, request),
+    listPiAiModelOptions: (request) =>
+      invoke(IPC_CHANNELS.settings.listPiAiModelOptions, request),
     getRuntimeApprovalSettings: () =>
       invoke(IPC_CHANNELS.settings.getRuntimeApprovalSettings),
     updateRuntimeApprovalSettings: (request) =>
@@ -84,7 +90,23 @@ const bonziApi = {
     selectWorkspaceFolder: () =>
       invoke(IPC_CHANNELS.settings.selectWorkspaceFolder),
     resetWorkspaceFolder: () =>
-      invoke(IPC_CHANNELS.settings.resetWorkspaceFolder)
+      invoke(IPC_CHANNELS.settings.resetWorkspaceFolder),
+    getHermesRuntimeSettings: () =>
+      invoke(IPC_CHANNELS.settings.getHermesRuntimeSettings),
+    updateHermesRuntimeSettings: (request) =>
+      invoke(IPC_CHANNELS.settings.updateHermesRuntimeSettings, request),
+    getHermesModelAuthSettings: () =>
+      invoke(IPC_CHANNELS.settings.getHermesModelAuthSettings),
+    updateHermesModelAuthSettings: (request) =>
+      invoke(IPC_CHANNELS.settings.updateHermesModelAuthSettings, request),
+    checkHermesModelAuthStatus: () =>
+      invoke(IPC_CHANNELS.settings.checkHermesModelAuthStatus),
+    checkHermesHealth: (request) =>
+      invoke(IPC_CHANNELS.settings.checkHermesHealth, request),
+    getRuntimeRoutingSettings: () =>
+      invoke(IPC_CHANNELS.settings.getRuntimeRoutingSettings),
+    updateRuntimeRoutingSettings: (request) =>
+      invoke(IPC_CHANNELS.settings.updateRuntimeRoutingSettings, request)
   },
   plugins: {
     discover: (request) => invoke(IPC_CHANNELS.plugins.discover, request),

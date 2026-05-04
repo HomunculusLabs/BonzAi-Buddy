@@ -14,6 +14,7 @@ export interface AppHydrationControllerOptions {
   hydrateConversation(messages: AssistantMessage[]): void
   appendSystemMessage(message: string): void
   getConversationEntryCount(): number
+  hydrateProviderSettings(): Promise<void>
   hydrateCharacterSettings(): Promise<void>
   hydrateKnowledgeSettings(): Promise<void>
   hydratePluginSettings(options?: HydratePluginSettingsOptions): Promise<void>
@@ -66,6 +67,7 @@ export function createAppHydrationController(
       }
 
       await Promise.all([
+        options.hydrateProviderSettings(),
         options.hydrateCharacterSettings(),
         options.hydrateKnowledgeSettings(),
         options.hydratePluginSettings({

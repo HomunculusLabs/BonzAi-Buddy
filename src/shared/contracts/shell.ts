@@ -4,6 +4,7 @@ import type {
   AssistantRuntimeStatus
 } from './assistant'
 import type { RuntimeApprovalSettings } from './approvals'
+import type { HermesSecondaryRuntimeSummary } from './hermes'
 
 export type ShellStateStage =
   | 'runtime-starting'
@@ -21,5 +22,8 @@ export interface ShellState {
     warnings: string[]
     runtime: AssistantRuntimeStatus
     approvals: RuntimeApprovalSettings
+    secondaryRuntimes?: {
+      hermes?: HermesSecondaryRuntimeSummary
+    }
   }
 }

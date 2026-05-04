@@ -2,6 +2,7 @@ import {
   ASSISTANT_ACTION_TYPES,
   type AssistantProviderInfo,
   type AssistantRuntimeStatus,
+  type HermesSecondaryRuntimeSummary,
   type RuntimeApprovalSettings,
   type ShellState,
   type ShellStateStage
@@ -21,6 +22,9 @@ export function buildShellState(
       maxRuntimeMs: 120_000,
       postActionDelayMs: 750
     }
+  },
+  secondaryRuntimes?: {
+    hermes?: HermesSecondaryRuntimeSummary
   }
 ): ShellState {
   const approvalNote = approvals.approvalsEnabled
@@ -41,7 +45,8 @@ export function buildShellState(
       availableActions,
       warnings,
       runtime,
-      approvals
+      approvals,
+      ...(secondaryRuntimes ? { secondaryRuntimes } : {})
     }
   }
 }

@@ -2,7 +2,8 @@ import * as THREE from 'three'
 import {
   createBellDetails,
   createBellGeometry,
-  createScallopedRimGeometry
+  createScallopedRimGeometry,
+  createUndersideFoldGeometry
 } from './jellyfish-geometry'
 import {
   createJellyfishMaterials,
@@ -75,7 +76,8 @@ export function composeJellyfishBuddy(): JellyfishBuddyComposition {
   glowLight.position.set(0, 0.02, 0.1)
   root.add(glowLight)
 
-  const { oralCoreGroup, tentacleRoot } = createUnderBellGroups(root)
+  const { oralCoreGroup, tentacleRoot, undersideFoldGroup } = createUnderBellGroups(root)
+  addUndersideFolds(undersideFoldGroup, materials.undersideFoldMaterial)
   const tentacles = createJellyfishTentacles({
     oralCoreGroup,
     tentacleRoot,
@@ -98,10 +100,15 @@ export function composeJellyfishBuddy(): JellyfishBuddyComposition {
 function createUnderBellGroups(root: THREE.Group): {
   oralCoreGroup: THREE.Group
   tentacleRoot: THREE.Group
+  undersideFoldGroup: THREE.Group
 } {
   const underBellRoot = new THREE.Group()
   underBellRoot.name = 'Jellyfish under-bell root'
   root.add(underBellRoot)
+
+  const undersideFoldGroup = new THREE.Group()
+  undersideFoldGroup.name = 'Jellyfish soft underside folds'
+  underBellRoot.add(undersideFoldGroup)
 
   const oralCoreGroup = new THREE.Group()
   oralCoreGroup.name = 'Jellyfish oral core ribbons'
@@ -111,13 +118,27 @@ function createUnderBellGroups(root: THREE.Group): {
   tentacleRoot.name = 'Jellyfish layered tentacle field'
   underBellRoot.add(tentacleRoot)
 
-  return { oralCoreGroup, tentacleRoot }
+  return { oralCoreGroup, tentacleRoot, undersideFoldGroup }
+}
+
+function addUndersideFolds(group: THREE.Group, material: THREE.MeshBasicMaterial): void {
+  for (let index = 0; index < 5; index += 1) {
+    const angle = index * 1.21 + Math.sin(index * 1.9) * 0.18
+    const fold = new THREE.Mesh(createUndersideFoldGeometry(index), material)
+    fold.name = 'Jellyfish soft underside fold'
+    fold.position.set(Math.cos(angle) * 0.12, 0.005 + Math.sin(index) * 0.012, Math.sin(angle) * 0.1)
+    fold.rotation.y = -angle + Math.PI / 2
+    fold.rotation.z = Math.sin(index * 2.4) * 0.18
+    fold.renderOrder = 18
+    group.add(fold)
+  }
 }
 
 function pickTentacleMaterials(materials: JellyfishMaterialSet) {
   return {
     filamentMaterial: materials.filamentMaterial,
     oralArmMaterial: materials.oralArmMaterial,
+    heroTentacleMaterial: materials.heroTentacleMaterial,
     tentacleRibbonMaterial: materials.tentacleRibbonMaterial
   }
 }

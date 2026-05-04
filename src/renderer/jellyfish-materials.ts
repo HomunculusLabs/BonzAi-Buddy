@@ -4,11 +4,13 @@ export interface JellyfishMaterialSet {
   bellMaterial: THREE.MeshPhysicalMaterial
   coreGlowMaterial: THREE.MeshBasicMaterial
   filamentMaterial: THREE.LineBasicMaterial
+  heroTentacleMaterial: THREE.MeshBasicMaterial
   innerBellMaterial: THREE.MeshBasicMaterial
   oralArmMaterial: THREE.MeshBasicMaterial
   oralGlowMaterial: THREE.MeshBasicMaterial
   skirtMaterial: THREE.MeshBasicMaterial
   spokeMaterial: THREE.LineBasicMaterial
+  undersideFoldMaterial: THREE.MeshBasicMaterial
   tentacleRibbonMaterial: THREE.MeshBasicMaterial
 }
 
@@ -39,7 +41,16 @@ export function createJellyfishMaterials(): JellyfishMaterialSet {
       color: 0xd7f4ff,
       depthTest: true,
       depthWrite: false,
-      opacity: 0.038,
+      opacity: 0.034,
+      transparent: true
+    }),
+    heroTentacleMaterial: new THREE.MeshBasicMaterial({
+      blending: THREE.AdditiveBlending,
+      color: 0xc6ecff,
+      depthTest: true,
+      depthWrite: false,
+      opacity: 0.2,
+      side: THREE.DoubleSide,
       transparent: true
     }),
     innerBellMaterial: new THREE.MeshBasicMaterial({
@@ -53,11 +64,11 @@ export function createJellyfishMaterials(): JellyfishMaterialSet {
       vertexColors: true
     }),
     oralArmMaterial: new THREE.MeshBasicMaterial({
-      blending: THREE.AdditiveBlending,
-      color: 0xa9ddff,
+      blending: THREE.NormalBlending,
+      color: 0xbadfff,
       depthTest: true,
       depthWrite: false,
-      opacity: 0.165,
+      opacity: 0.2,
       side: THREE.DoubleSide,
       transparent: true
     }),
@@ -72,7 +83,7 @@ export function createJellyfishMaterials(): JellyfishMaterialSet {
       blending: THREE.AdditiveBlending,
       color: 0x86ccff,
       depthWrite: false,
-      opacity: 0.072,
+      opacity: 0.06,
       transparent: true,
       vertexColors: true
     }),
@@ -86,10 +97,19 @@ export function createJellyfishMaterials(): JellyfishMaterialSet {
     }),
     tentacleRibbonMaterial: new THREE.MeshBasicMaterial({
       blending: THREE.AdditiveBlending,
-      color: 0x9bddff,
+      color: 0xaee7ff,
       depthTest: true,
       depthWrite: false,
-      opacity: 0.18,
+      opacity: 0.115,
+      side: THREE.DoubleSide,
+      transparent: true
+    }),
+    undersideFoldMaterial: new THREE.MeshBasicMaterial({
+      blending: THREE.NormalBlending,
+      color: 0xadddff,
+      depthTest: true,
+      depthWrite: false,
+      opacity: 0.095,
       side: THREE.DoubleSide,
       transparent: true
     })

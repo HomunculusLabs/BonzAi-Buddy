@@ -18,9 +18,12 @@ export interface MountedAppElements {
   chatInputEl: HTMLInputElement
   assistantSendButton: HTMLButtonElement
   settingsPanelEl: HTMLElement
+  providerSettingsEl: HTMLElement
   characterSettingsEl: HTMLElement
   knowledgeSettingsEl: HTMLElement
   workspaceSettingsEl: HTMLElement
+  hermesSettingsEl: HTMLElement
+  routingSettingsEl: HTMLElement
   approvalSettingsEl: HTMLElement
   pluginSettingsEl: HTMLElement
   settingsStatusEl: HTMLElement
@@ -60,7 +63,10 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
             <h2 id="settings-panel-title">Settings</h2>
             <p>Manage Bonzi's companion, autonomy, character, and elizaOS plugins.</p>
           </div>
-          <button class="window-button" data-action="settings-close" type="button" aria-label="Close settings">×</button>
+          <div class="settings-panel__header-actions">
+            <a class="ghost-button settings-panel__nav-link" href="?bonziAdmin=1">Open Admin UI</a>
+            <button class="window-button" data-action="settings-close" type="button" aria-label="Close settings">×</button>
+          </div>
         </header>
 
         <div class="settings-panel__layout">
@@ -151,6 +157,48 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
             </button>
             <button
               class="settings-panel__tab"
+              data-settings-tab="hermes"
+              id="settings-tab-hermes"
+              type="button"
+              role="tab"
+              aria-controls="settings-pane-hermes"
+              aria-selected="false"
+              tabindex="-1"
+            >
+              <span class="settings-panel__tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M12 2.8 4.4 7.2v8.7L12 20.2l7.6-4.3V7.2L12 2.8Z" />
+                  <path d="M8.2 9.1 12 6.9l3.8 2.2M8.2 14.8 12 17l3.8-2.2M12 7v10" class="settings-panel__tab-icon-cutout" />
+                </svg>
+              </span>
+              <span class="settings-panel__tab-copy">
+                <span class="settings-panel__tab-label">Hermes</span>
+                <small>Secondary</small>
+              </span>
+            </button>
+            <button
+              class="settings-panel__tab"
+              data-settings-tab="routing"
+              id="settings-tab-routing"
+              type="button"
+              role="tab"
+              aria-controls="settings-pane-routing"
+              aria-selected="false"
+              tabindex="-1"
+            >
+              <span class="settings-panel__tab-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M4 6h6l2 3h8v9H4V6Z" />
+                  <path d="M8 12h8M12 9v6" class="settings-panel__tab-icon-cutout" />
+                </svg>
+              </span>
+              <span class="settings-panel__tab-copy">
+                <span class="settings-panel__tab-label">Routing</span>
+                <small>Rules</small>
+              </span>
+            </button>
+            <button
+              class="settings-panel__tab"
               data-settings-tab="plugins"
               id="settings-tab-plugins"
               type="button"
@@ -180,6 +228,7 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
               role="tabpanel"
               aria-labelledby="settings-tab-general"
             >
+              <div class="settings-panel__section provider-settings" data-provider-settings></div>
               <div class="settings-panel__section companion-settings" data-companion-settings>
                 <div class="settings-panel__section-header">
                   <h3 class="settings-panel__section-title">Buddy</h3>
@@ -231,6 +280,28 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
               hidden
             >
               <div class="settings-panel__section knowledge-settings" data-knowledge-settings></div>
+            </section>
+
+            <section
+              class="settings-panel__pane"
+              data-settings-pane="hermes"
+              id="settings-pane-hermes"
+              role="tabpanel"
+              aria-labelledby="settings-tab-hermes"
+              hidden
+            >
+              <div class="settings-panel__section hermes-settings" data-hermes-settings></div>
+            </section>
+
+            <section
+              class="settings-panel__pane"
+              data-settings-pane="routing"
+              id="settings-pane-routing"
+              role="tabpanel"
+              aria-labelledby="settings-tab-routing"
+              hidden
+            >
+              <div class="settings-panel__section routing-settings" data-routing-settings></div>
             </section>
 
             <section
@@ -335,6 +406,7 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
     '[data-role="assistant-send"]'
   )
   const settingsPanelEl = root.querySelector<HTMLElement>('[data-settings-panel]')
+  const providerSettingsEl = root.querySelector<HTMLElement>('[data-provider-settings]')
   const characterSettingsEl = root.querySelector<HTMLElement>(
     '[data-character-settings]'
   )
@@ -347,6 +419,8 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
   const workspaceSettingsEl = root.querySelector<HTMLElement>(
     '[data-workspace-settings]'
   )
+  const hermesSettingsEl = root.querySelector<HTMLElement>('[data-hermes-settings]')
+  const routingSettingsEl = root.querySelector<HTMLElement>('[data-routing-settings]')
   const pluginSettingsEl = root.querySelector<HTMLElement>('[data-plugin-settings]')
   const settingsStatusEl = root.querySelector<HTMLElement>('[data-settings-status]')
   const buddySelectEl = root.querySelector<HTMLSelectElement>('[data-buddy-select]')
@@ -374,10 +448,13 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
     !chatInputEl ||
     !assistantSendButton ||
     !settingsPanelEl ||
+    !providerSettingsEl ||
     !characterSettingsEl ||
     !approvalSettingsEl ||
     !knowledgeSettingsEl ||
     !workspaceSettingsEl ||
+    !hermesSettingsEl ||
+    !routingSettingsEl ||
     !pluginSettingsEl ||
     !settingsStatusEl ||
     !buddySelectEl ||
@@ -406,9 +483,12 @@ export function mountAppDom(root: HTMLDivElement): MountedAppElements {
     chatInputEl,
     assistantSendButton,
     settingsPanelEl,
+    providerSettingsEl,
     characterSettingsEl,
     knowledgeSettingsEl,
     workspaceSettingsEl,
+    hermesSettingsEl,
+    routingSettingsEl,
     approvalSettingsEl,
     pluginSettingsEl,
     settingsStatusEl,

@@ -91,7 +91,7 @@ export function evaluateJellyfishFrame(input: {
     state.activeEmote = null
   }
 
-  const swim = Math.sin(elapsed * 2.05)
+  const swim = Math.sin(elapsed * 1.55)
   const swimBurst = animationEnvelope(
     elapsed,
     state.swimBurstStartAt,
@@ -126,12 +126,12 @@ export function evaluateJellyfishFrame(input: {
   const clickWobble = Math.sin(elapsed * 12) * doubleClickBurst
   const pulse =
     1 +
-    swim * 0.03 +
-    swimBurst * 0.12 +
-    happyBounce * 0.16 +
-    dragHold * 0.08 +
-    dragRelease * 0.06 +
-    doubleClickBurst * 0.22
+    swim * 0.02 +
+    swimBurst * 0.095 +
+    happyBounce * 0.14 +
+    dragHold * 0.065 +
+    dragRelease * 0.05 +
+    doubleClickBurst * 0.18
   const tentacleEnergy =
     1 +
     swimBurst * 0.7 +
@@ -141,12 +141,12 @@ export function evaluateJellyfishFrame(input: {
     dragRelease * 0.58 +
     doubleClickBurst * 0.82
   const driftX =
-    pointerNdc.x * 0.045 +
-    Math.sin(elapsed * 0.62) * 0.035 +
+    pointerNdc.x * 0.036 +
+    Math.sin(elapsed * 0.34) * 0.035 +
     waveSway * 0.07 +
     dragWobble * 0.032
   const driftZ =
-    Math.cos(elapsed * 0.52) * 0.025 -
+    Math.cos(elapsed * 0.23) * 0.022 -
     swimBurst * 0.05 +
     dragHold * 0.03 -
     doubleClickBurst * 0.07
@@ -180,7 +180,7 @@ export function evaluateJellyfishFrame(input: {
     rootPosition: new THREE.Vector3(
       driftX,
       0.92 +
-        Math.sin(elapsed * 1.16) * 0.07 +
+        Math.sin(elapsed * 0.54) * 0.045 +
         swimBurst * 0.1 +
         happyBounce * 0.22 +
         dragRelease * 0.045 +
@@ -190,7 +190,7 @@ export function evaluateJellyfishFrame(input: {
     rootRotationYVelocity:
       0.14 + swimBurst * 0.28 + happyBounce * 0.22 + doubleClickBurst * 3.3,
     rootRotationZ:
-      -pointerNdc.x * 0.06 + waveSway * 0.18 + dragWobble * 0.15 + clickWobble * 0.06,
+      -pointerNdc.x * 0.045 + Math.sin(elapsed * 0.41) * 0.04 + waveSway * 0.18 + dragWobble * 0.13 + clickWobble * 0.05,
     rootScale: new THREE.Vector3(
       1 + dragHold * 0.04 + dragRelease * 0.025 + doubleClickBurst * 0.07,
       1 - dragHold * 0.065 + dragRelease * 0.035 + doubleClickBurst * 0.09,

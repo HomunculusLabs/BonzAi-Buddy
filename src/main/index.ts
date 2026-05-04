@@ -30,7 +30,10 @@ function getShellState() {
     assistantService.getStartupWarnings(),
     assistantService.getRuntimeStatus(),
     assistantService.getAvailableActionTypes(),
-    assistantService.getRuntimeApprovalSettings()
+    assistantService.getRuntimeApprovalSettings(),
+    {
+      hermes: assistantService.getHermesSecondaryRuntimeSummary()
+    }
   )
 }
 
@@ -60,10 +63,6 @@ app.whenReady().then(() => {
 
   registerIpcHandlers({
     assistantService
-  })
-
-  void assistantService.getHistory().catch((error) => {
-    console.error('Failed to warm Bonzi assistant runtime:', error)
   })
 
   openCompanionWindow()

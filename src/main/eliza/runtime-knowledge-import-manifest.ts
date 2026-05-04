@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type { KnowledgeFolderDocumentCandidate } from './runtime-knowledge-folder-scan'
 import type { PreparedKnowledgeDocument } from './runtime-knowledge-import'
@@ -31,6 +31,7 @@ export class KnowledgeImportManifestStore {
   private readonly files: Map<string, PersistedKnowledgeImportManifestEntry>
   private dirtyFileCount = 0
   private lastFlushAt = Date.now()
+  private directoryReady = false
 
   private constructor(
     manifestPath: string,
@@ -124,8 +125,15 @@ export class KnowledgeImportManifestStore {
       files: Object.fromEntries(this.files.entries())
     }
 
-    await mkdir(dirname(this.manifestPath), { recursive: true })
-    await writeFile(this.manifestPath, JSON.stringify(payload, null, 2), 'utf8')
+    if (!this.directoryReady) {
+      await mkdir(dirname(this.manifestPath), { recursive: true })
+      this.directoryReady = true
+    }
+
+    const serialized = JSON.stringify(payload)
+    const tempPath = `${this.manifestPath}.${process.pid}.tmp`
+    await writeFile(tempPath, serialized, 'utf8')
+    await rename(tempPath, this.manifestPath)
   }
 }
 

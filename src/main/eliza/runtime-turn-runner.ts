@@ -2,7 +2,8 @@ import type { Content, UUID } from '@elizaos/core/node'
 import type {
   AssistantAction,
   AssistantEventEmoteId,
-  BonziWorkflowRunSnapshot
+  BonziWorkflowRunSnapshot,
+  RuntimeRoutingSettings
 } from '../../shared/contracts'
 import { normalizeError } from '../../shared/value-utils'
 import { normalizeText } from '../assistant-action-param-utils'
@@ -17,12 +18,14 @@ import {
   filterFailedProposedActions,
   type BonziProposedAction
 } from './runtime-action-proposals'
+import { evaluateRuntimeRoutingRules } from './runtime-routing-rules'
 import type { BonziWorkflowManager } from './workflow-manager'
 
 interface RuntimeTurnRunnerOptions {
   configState: BonziRuntimeConfigState
   getRuntime: () => Promise<RuntimeBundle>
   workflowManager: BonziWorkflowManager
+  getRoutingSettings: () => RuntimeRoutingSettings
 }
 
 interface RuntimePassInput {
@@ -46,15 +49,22 @@ export class BonziRuntimeTurnRunner {
   private readonly configState: BonziRuntimeConfigState
   private readonly getRuntime: () => Promise<RuntimeBundle>
   private readonly workflowManager: BonziWorkflowManager
+  private readonly getRoutingSettings: () => RuntimeRoutingSettings
 
   constructor(options: RuntimeTurnRunnerOptions) {
     this.configState = options.configState
     this.getRuntime = options.getRuntime
     this.workflowManager = options.workflowManager
+    this.getRoutingSettings = options.getRoutingSettings
   }
 
   async sendCommand(command: string): Promise<BonziRuntimeTurn> {
     const config = this.configState.sync()
+    const routedTurn = await this.buildRoutedInitialTurn(command, config.e2eMode)
+
+    if (routedTurn) {
+      return routedTurn
+    }
 
     if (config.e2eMode) {
       return this.buildE2eInitialTurn(command)
@@ -108,6 +118,44 @@ export class BonziRuntimeTurnRunner {
       text,
       source: 'bonzi-action-observation-continuation',
       continuationIndex: input.continuationIndex
+    })
+  }
+
+  private async buildRoutedInitialTurn(
+    command: string,
+    e2eMode: boolean
+  ): Promise<BonziRuntimeTurn | null> {
+    const routed = evaluateRuntimeRoutingRules({
+      command,
+      settings: this.getRoutingSettings()
+    })
+
+    if (routed.actions.length === 0) {
+      return null
+    }
+
+    const run = e2eMode
+      ? this.workflowManager.createRun({
+          commandMessageId: crypto.randomUUID(),
+          roomId: 'bonzi-e2e-room',
+          userCommand: command
+        })
+      : this.workflowManager.createRun({
+          commandMessageId: crypto.randomUUID(),
+          roomId: String((await this.getRuntime()).roomId),
+          userCommand: command
+        })
+    const ruleNames = routed.matchedRules.map((match) => `“${match.rule.name}”`)
+    const reply = ruleNames.length === 1
+      ? `Routing rule ${ruleNames[0]} matched. I prepared the configured Bonzi action before Eliza continues.`
+      : `${ruleNames.length} routing rules matched. I prepared the configured Bonzi actions before Eliza continues.`
+
+    return this.finalizePass({
+      runId: run.id,
+      reply,
+      actions: routed.actions,
+      warnings: routed.warnings,
+      continuationIndex: 0
     })
   }
 
@@ -213,6 +261,7 @@ export class BonziRuntimeTurnRunner {
     reply: string
     actions: BonziProposedAction[]
     continuationIndex: number
+    warnings?: string[]
   }): BonziRuntimeTurn {
     const run = this.workflowManager.getRun(input.runId)
 
@@ -220,7 +269,7 @@ export class BonziRuntimeTurnRunner {
       return {
         reply: input.reply,
         actions: input.actions,
-        warnings: [],
+        warnings: input.warnings ?? [],
         continuationIndex: input.continuationIndex
       }
     }
@@ -233,7 +282,7 @@ export class BonziRuntimeTurnRunner {
       return {
         reply: input.reply,
         actions: [],
-        warnings: [],
+        warnings: input.warnings ?? [],
         workflowRun: completedRun ?? run,
         commandMessageId: run.commandMessageId,
         continuationIndex: input.continuationIndex
@@ -267,7 +316,7 @@ export class BonziRuntimeTurnRunner {
     return {
       reply: input.reply,
       actions: correlatedActions,
-      warnings: [],
+      warnings: input.warnings ?? [],
       workflowRun: latestRun,
       commandMessageId: run.commandMessageId,
       continuationIndex: input.continuationIndex
@@ -281,12 +330,20 @@ export class BonziRuntimeTurnRunner {
       userCommand: command
     })
     const lowerCommand = command.toLowerCase()
-    const actions = lowerCommand.includes('multi step e2e')
+    const isMultiStepE2e = lowerCommand.includes('multi step e2e')
+    const isHermesDelegationE2e = lowerCommand.includes('hermes delegation e2e')
+    const actions = isMultiStepE2e
       ? [createBonziDesktopActionProposal('report-shell-state')]
-      : buildLegacyE2eActions(command)
-    const reply = lowerCommand.includes('multi step e2e')
+      : isHermesDelegationE2e
+        ? [createBonziDesktopActionProposal('hermes-run', {
+            prompt: 'E2E Hermes secondary consultation: identify one risk and one next step.'
+          })]
+        : buildLegacyE2eActions(command)
+    const reply = isMultiStepE2e
       ? 'Starting multi-step e2e workflow.'
-      : `E2E assistant reply for: ${command}`
+      : isHermesDelegationE2e
+        ? 'Starting Hermes delegation e2e workflow.'
+        : `E2E assistant reply for: ${command}`
 
     return this.finalizePass({
       runId: run.id,
@@ -302,14 +359,18 @@ export class BonziRuntimeTurnRunner {
     observation: string
     continuationIndex: number
   }): BonziRuntimeTurn {
+    const lowerCommand = input.run.userCommand.toLowerCase()
     const nextAction =
-      input.run.userCommand.toLowerCase().includes('multi step e2e') &&
+      lowerCommand.includes('multi step e2e') &&
       input.action.type === 'report-shell-state'
         ? [createBonziDesktopActionProposal('copy-vrm-asset-path')]
         : []
-    const reply = nextAction.length > 0
-      ? 'Observed shell state; next step is copying the asset path.'
-      : 'Multi-step e2e complete.'
+    const reply = lowerCommand.includes('hermes delegation e2e') &&
+      input.action.type === 'hermes-run'
+      ? 'Eliza received the Hermes observation and completed the delegation workflow.'
+      : nextAction.length > 0
+        ? 'Observed shell state; next step is copying the asset path.'
+        : 'Multi-step e2e complete.'
 
     return this.finalizePass({
       runId: input.run.id,
@@ -325,6 +386,23 @@ function buildContinuationPrompt(input: {
   action: AssistantAction
   observation: string
 }): string {
+  if (input.action.type === 'hermes-run') {
+    return `Complete the current Bonzi workflow from the Hermes observation.
+
+Original user task:
+${input.run.userCommand}
+
+Hermes secondary consultation completed:
+${input.action.title}
+
+Observation:
+${input.observation}
+
+Hermes has already been consulted for this workflow. Do not propose another HERMES_RUN / Consult Hermes action. Do not redirect to Discord unless the original user task specifically asks for Discord conversation history. Use the observation as evidence and produce the final user-facing answer for the operator.
+
+Keep the answer concise and actionable: lead with the current status, then list the highest-priority risks and next steps.`
+  }
+
   return `Continue the current Bonzi workflow.
 
 Original user task:
@@ -357,6 +435,14 @@ function buildLegacyE2eActions(command: string): BonziProposedAction[] {
       createBonziDesktopActionProposal('discord-type-draft', {
         url: process.env.BONZI_E2E_DISCORD_URL,
         text: 'Thanks, I will take a look.'
+      })
+    ]
+  }
+
+  if (lowerCommand.includes('hermes cron e2e')) {
+    return [
+      createBonziDesktopActionProposal('inspect-cron-jobs', {
+        query: 'e2e'
       })
     ]
   }

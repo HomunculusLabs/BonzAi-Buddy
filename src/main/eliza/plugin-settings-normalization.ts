@@ -1,6 +1,13 @@
 import {
   ELIZA_OPTIONAL_PLUGIN_IDS,
   ELIZA_REQUIRED_PLUGIN_IDS,
+  type AssistantProviderKind,
+  type PersistedAssistantProviderSettings,
+  type RuntimeRoutingRule,
+  type RuntimeRoutingRuleMatch,
+  type RuntimeRoutingRuleTarget,
+  type RuntimeRoutingSettings,
+  type RuntimeRoutingTargetActionType,
   type ElizaOptionalPluginId,
   type ElizaPluginExecutionPolicy,
   type ElizaPluginId,
@@ -12,6 +19,7 @@ import {
 import { isRecord, normalizeOptionalString } from '../../shared/value-utils'
 import {
   DEFAULT_PLUGIN_RUNTIME_SETTINGS,
+  DEFAULT_RUNTIME_ROUTING_SETTINGS,
   OPTIONAL_PLUGIN_CATALOG,
   type LoadedSettingsState,
   type NormalizedPluginInventory,
@@ -31,6 +39,9 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
       approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
       continuation: DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation,
       characterSettings: getDefaultCharacterSettings(),
+      providerSettings: {},
+      routingSettings: { ...DEFAULT_RUNTIME_ROUTING_SETTINGS },
+      routingWarnings: [],
       needsRewrite: true,
       fileExisted: true
     }
@@ -45,6 +56,9 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
         approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
         continuation: DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation,
         characterSettings: getDefaultCharacterSettings(),
+        providerSettings: {},
+        routingSettings: { ...DEFAULT_RUNTIME_ROUTING_SETTINGS },
+        routingWarnings: [],
         needsRewrite: true,
         fileExisted: true
       }
@@ -69,6 +83,16 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
 
     const normalizedCharacter = normalizePersistedCharacterSettings(parsed.character)
     if (normalizedCharacter.needsRewrite) {
+      needsRewrite = true
+    }
+
+    const normalizedProvider = normalizePersistedProviderSettings(parsed.provider)
+    if (normalizedProvider.needsRewrite) {
+      needsRewrite = true
+    }
+
+    const normalizedRouting = normalizeRuntimeRoutingSettings(parsed.routing)
+    if (normalizedRouting.needsRewrite) {
       needsRewrite = true
     }
 
@@ -102,6 +126,9 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
       approvalsEnabled,
       continuation: continuation.settings,
       characterSettings: normalizedCharacter.settings,
+      providerSettings: normalizedProvider.settings,
+      routingSettings: normalizedRouting.settings,
+      routingWarnings: normalizedRouting.warnings,
       needsRewrite,
       fileExisted: true
     }
@@ -113,6 +140,9 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
       approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
       continuation: DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation,
       characterSettings: getDefaultCharacterSettings(),
+      providerSettings: {},
+      routingSettings: { ...DEFAULT_RUNTIME_ROUTING_SETTINGS },
+      routingWarnings: [],
       needsRewrite: true,
       fileExisted: true
     }
@@ -123,9 +153,287 @@ export function normalizeParsedSettings(parsed: unknown): LoadedSettingsState {
     approvalsEnabled: DEFAULT_PLUGIN_RUNTIME_SETTINGS.approvalsEnabled,
     continuation: DEFAULT_PLUGIN_RUNTIME_SETTINGS.continuation,
     characterSettings: getDefaultCharacterSettings(),
+    providerSettings: {},
+    routingSettings: { ...DEFAULT_RUNTIME_ROUTING_SETTINGS },
+    routingWarnings: [],
     needsRewrite: true,
     fileExisted: true
   }
+}
+
+export function normalizePersistedProviderSettings(value: unknown): {
+  settings: PersistedAssistantProviderSettings
+  needsRewrite: boolean
+} {
+  if (value === undefined) {
+    return { settings: {}, needsRewrite: false }
+  }
+
+  if (!isRecord(value)) {
+    return { settings: {}, needsRewrite: true }
+  }
+
+  let needsRewrite = false
+  const settings: PersistedAssistantProviderSettings = {}
+
+  if (isAssistantProviderKind(value.provider)) {
+    settings.provider = value.provider
+  } else if (value.provider !== undefined) {
+    needsRewrite = true
+  }
+
+  if (isRecord(value.openaiCompatible)) {
+    const openaiCompatible = normalizeStringFields(value.openaiCompatible, [
+      'baseUrl',
+      'model'
+    ])
+    if (Object.keys(openaiCompatible).length > 0) {
+      settings.openaiCompatible = openaiCompatible
+    }
+    needsRewrite = needsRewrite || requiresStringFieldsRewrite(
+      value.openaiCompatible,
+      openaiCompatible,
+      ['baseUrl', 'model']
+    )
+  } else if (value.openaiCompatible !== undefined) {
+    needsRewrite = true
+  }
+
+  if (isRecord(value.piAi)) {
+    const piAi = normalizeStringFields(value.piAi, [
+      'agentDir',
+      'modelSpec',
+      'smallModelSpec',
+      'largeModelSpec',
+      'priority'
+    ])
+    if (Object.keys(piAi).length > 0) {
+      settings.piAi = piAi
+    }
+    needsRewrite = needsRewrite || requiresStringFieldsRewrite(
+      value.piAi,
+      piAi,
+      ['agentDir', 'modelSpec', 'smallModelSpec', 'largeModelSpec', 'priority']
+    )
+  } else if (value.piAi !== undefined) {
+    needsRewrite = true
+  }
+
+  return { settings, needsRewrite }
+}
+
+export function normalizeRuntimeRoutingSettings(value: unknown): {
+  settings: RuntimeRoutingSettings
+  warnings: string[]
+  needsRewrite: boolean
+} {
+  if (value === undefined) {
+    return {
+      settings: { ...DEFAULT_RUNTIME_ROUTING_SETTINGS, rules: [] },
+      warnings: [],
+      needsRewrite: false
+    }
+  }
+
+  if (!isRecord(value)) {
+    return {
+      settings: { ...DEFAULT_RUNTIME_ROUTING_SETTINGS, rules: [] },
+      warnings: ['Routing settings were invalid and reset to defaults.'],
+      needsRewrite: true
+    }
+  }
+
+  const warnings: string[] = []
+  const rulesInput = Array.isArray(value.rules) ? value.rules : []
+  const rules: RuntimeRoutingRule[] = []
+  let needsRewrite =
+    typeof value.enabled !== 'boolean' || !Array.isArray(value.rules)
+
+  rulesInput.slice(0, 50).forEach((ruleValue, index) => {
+    const normalized = normalizeRuntimeRoutingRule(ruleValue, index, warnings)
+    if (!normalized.rule) {
+      needsRewrite = true
+      return
+    }
+
+    rules.push(normalized.rule)
+    if (normalized.needsRewrite) {
+      needsRewrite = true
+    }
+  })
+
+  if (rulesInput.length > 50) {
+    warnings.push('Only the first 50 routing rules are used.')
+    needsRewrite = true
+  }
+
+  return {
+    settings: {
+      enabled: typeof value.enabled === 'boolean' ? value.enabled : true,
+      rules
+    },
+    warnings,
+    needsRewrite
+  }
+}
+
+function normalizeRuntimeRoutingRule(
+  value: unknown,
+  index: number,
+  warnings: string[]
+): { rule: RuntimeRoutingRule | null; needsRewrite: boolean } {
+  if (!isRecord(value)) {
+    warnings.push(`Routing rule ${index + 1} was skipped because it is not an object.`)
+    return { rule: null, needsRewrite: true }
+  }
+
+  let needsRewrite = false
+  const id = normalizeLimitedString(value.id, 128) || `routing-rule-${index + 1}`
+  const name = normalizeLimitedString(value.name, 120) || `Routing rule ${index + 1}`
+  const priority = clampInteger(value.priority, -10_000, 10_000, 0)
+  const match = normalizeRuntimeRoutingMatch(value.match, name, warnings)
+  const target = normalizeRuntimeRoutingTarget(value.target, name, warnings)
+
+  if (!match || !target) {
+    return { rule: null, needsRewrite: true }
+  }
+
+  if (
+    id !== value.id ||
+    name !== value.name ||
+    priority !== value.priority ||
+    typeof value.enabled !== 'boolean' ||
+    typeof value.stopOnMatch !== 'boolean'
+  ) {
+    needsRewrite = true
+  }
+
+  return {
+    rule: {
+      id,
+      enabled: typeof value.enabled === 'boolean' ? value.enabled : true,
+      name,
+      priority,
+      match,
+      target,
+      stopOnMatch: typeof value.stopOnMatch === 'boolean' ? value.stopOnMatch : true
+    },
+    needsRewrite
+  }
+}
+
+function normalizeRuntimeRoutingMatch(
+  value: unknown,
+  ruleName: string,
+  warnings: string[]
+): RuntimeRoutingRuleMatch | null {
+  if (!isRecord(value)) {
+    warnings.push(`Routing rule “${ruleName}” was skipped because it has no match settings.`)
+    return null
+  }
+
+  const caseSensitive = value.caseSensitive === true
+
+  if (value.kind === 'regex') {
+    const pattern = normalizeLimitedString(value.pattern, 300)
+    if (!pattern) {
+      warnings.push(`Routing rule “${ruleName}” was skipped because its regex pattern is empty.`)
+      return null
+    }
+
+    try {
+      new RegExp(pattern, caseSensitive ? 'u' : 'iu')
+    } catch (error) {
+      warnings.push(`Routing rule “${ruleName}” has an invalid regex and was disabled: ${String(error)}`)
+      return {
+        kind: 'regex',
+        pattern,
+        caseSensitive
+      }
+    }
+
+    return {
+      kind: 'regex',
+      pattern,
+      caseSensitive
+    }
+  }
+
+  const keywords = normalizeLimitedStringArray(value.keywords, 20, 120)
+  if (keywords.length === 0) {
+    warnings.push(`Routing rule “${ruleName}” was skipped because it has no keywords.`)
+    return null
+  }
+
+  return {
+    kind: 'keyword',
+    keywords,
+    mode: value.mode === 'all' ? 'all' : 'any',
+    caseSensitive
+  }
+}
+
+function normalizeRuntimeRoutingTarget(
+  value: unknown,
+  ruleName: string,
+  warnings: string[]
+): RuntimeRoutingRuleTarget | null {
+  if (!isRecord(value)) {
+    warnings.push(`Routing rule “${ruleName}” was skipped because it has no target settings.`)
+    return null
+  }
+
+  const actionType = normalizeRoutingTargetActionType(value.actionType)
+  if (!actionType) {
+    warnings.push(`Routing rule “${ruleName}” has an unsupported target action.`)
+    return null
+  }
+
+  const params = isRecord(value.params) ? value.params : {}
+  const prompt = normalizeLimitedString(params.prompt, 24_000)
+  const query = normalizeLimitedString(params.query, 500)
+
+  return {
+    actionType,
+    params: {
+      ...(prompt ? { prompt } : {}),
+      ...(query ? { query } : {})
+    },
+    ...(typeof value.requiresConfirmation === 'boolean'
+      ? { requiresConfirmation: value.requiresConfirmation }
+      : {})
+  }
+}
+
+function normalizeRoutingTargetActionType(
+  value: unknown
+): RuntimeRoutingTargetActionType | null {
+  return value === 'hermes-run' || value === 'inspect-cron-jobs' ? value : null
+}
+
+function normalizeLimitedString(value: unknown, maxLength: number): string | undefined {
+  return typeof value === 'string'
+    ? normalizeOptionalString(value)?.slice(0, maxLength)
+    : undefined
+}
+
+function normalizeLimitedStringArray(
+  value: unknown,
+  maxItems: number,
+  maxLength: number
+): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return Array.from(new Set(
+    value
+      .flatMap((entry) => {
+        const normalized = normalizeLimitedString(entry, maxLength)
+        return normalized ? [normalized] : []
+      })
+      .slice(0, maxItems)
+  ))
 }
 
 export function normalizeRuntimeContinuationSettings(value: unknown): {
@@ -501,6 +809,46 @@ function isLegacyPersistedSettingsFile(
   }
 
   return catalog.installed === undefined || isBooleanRecord(catalog.installed)
+}
+
+function isAssistantProviderKind(value: unknown): value is AssistantProviderKind {
+  return value === 'eliza-classic' || value === 'openai-compatible' || value === 'pi-ai'
+}
+
+function normalizeStringFields<T extends string>(
+  value: Record<string, unknown>,
+  fields: readonly T[]
+): Partial<Record<T, string>> {
+  const normalized: Partial<Record<T, string>> = {}
+
+  for (const field of fields) {
+    const normalizedValue = normalizeOptionalString(value[field])
+    if (normalizedValue !== undefined) {
+      normalized[field] = normalizedValue
+    }
+  }
+
+  return normalized
+}
+
+function requiresStringFieldsRewrite<T extends string>(
+  value: Record<string, unknown>,
+  normalized: Partial<Record<T, string>>,
+  fields: readonly T[]
+): boolean {
+  for (const field of fields) {
+    const raw = value[field]
+    const next = normalized[field]
+    if (raw === undefined && next === undefined) {
+      continue
+    }
+
+    if (raw !== next) {
+      return true
+    }
+  }
+
+  return false
 }
 
 function isPersistedPluginRecord(value: unknown): value is PersistedPluginRecord {

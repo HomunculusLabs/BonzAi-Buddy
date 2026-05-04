@@ -1,9 +1,13 @@
-import type { AssistantProviderInfo } from '../../shared/contracts'
+import type { AssistantProviderInfo, PersistedAssistantProviderSettings } from '../../shared/contracts'
 import { dedupeStrings } from '../../shared/value-utils'
 import {
   loadBonziElizaConfig,
   type BonziElizaResolvedConfig
 } from './config'
+
+interface BonziRuntimeConfigStateOptions {
+  getProviderSettings?: () => PersistedAssistantProviderSettings
+}
 
 export class BonziRuntimeConfigState {
   private providerInfo: AssistantProviderInfo = {
@@ -12,9 +16,14 @@ export class BonziRuntimeConfigState {
   }
   private startupWarnings: string[] = []
   private runtimeStartupWarnings: string[] = []
+  private readonly getProviderSettings: () => PersistedAssistantProviderSettings
+
+  constructor(options: BonziRuntimeConfigStateOptions = {}) {
+    this.getProviderSettings = options.getProviderSettings ?? (() => ({}))
+  }
 
   sync(): BonziElizaResolvedConfig {
-    const config = loadBonziElizaConfig()
+    const config = loadBonziElizaConfig(undefined, this.getProviderSettings())
     this.applyConfig(config)
     return config
   }

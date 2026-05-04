@@ -46,11 +46,39 @@ const ACTION_DEFAULTS: Record<
     description: 'Open a safely encoded web search in the system default browser.',
     requiresConfirmation: false
   },
+  'surf-browser-read': {
+    type: 'surf-browser-read',
+    title: 'Read browser page',
+    description:
+      'Placeholder for browser-page reading. This action type is not wired in this Bonzi build yet.',
+    requiresConfirmation: false
+  },
+  'surf-browser-action': {
+    type: 'surf-browser-action',
+    title: 'Control browser page',
+    description:
+      'Placeholder for browser-page control. This action type is not wired in this Bonzi build yet.',
+    requiresConfirmation: true
+  },
   'cua-check-status': {
     type: 'cua-check-status',
     title: 'Check Cua Driver status',
     description:
       'Check whether Cua Driver is installed, reachable, running, and has the required macOS permissions.',
+    requiresConfirmation: false
+  },
+  'hermes-run': {
+    type: 'hermes-run',
+    title: 'Consult Hermes',
+    description:
+      'Consult Hermes as a secondary specialist. Hermes returns observation text only; Eliza remains the orchestrator and memory owner.',
+    requiresConfirmation: false
+  },
+  'inspect-cron-jobs': {
+    type: 'inspect-cron-jobs',
+    title: 'Inspect Hermes cron jobs',
+    description:
+      'Inspect Hermes cron jobs through the secondary runtime and return a read-only observation for Eliza.',
     requiresConfirmation: false
   },
   'discord-snapshot': {

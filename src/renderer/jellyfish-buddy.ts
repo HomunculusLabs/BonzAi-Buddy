@@ -55,9 +55,9 @@ export function createJellyfishBuddy(scene: THREE.Scene): JellyfishBuddyHandle {
   } = composeJellyfishBuddy()
 
   const metrics: VrmSubjectMetrics = {
-    center: new THREE.Vector3(0, 0.46, 0),
-    rootHeight: Math.max(1.72, MIN_SUBJECT_HEIGHT),
-    size: new THREE.Vector3(1.24, 1.78, 1.04)
+    center: new THREE.Vector3(0, 0.38, 0),
+    rootHeight: Math.max(1.95, MIN_SUBJECT_HEIGHT),
+    size: new THREE.Vector3(1.36, 2.02, 1.18)
   }
 
   scene.add(root)

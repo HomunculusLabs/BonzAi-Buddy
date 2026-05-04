@@ -5,8 +5,11 @@ import type {
 import {
   hasAssistantActionParams,
   normalizeDiscordDraftText,
+  normalizePromptText,
   normalizeScrollAmount,
   normalizeScrollDirection,
+  normalizeSurfArgs,
+  normalizeSurfCommand,
   normalizeText,
   normalizeWorkspaceFileContent,
   normalizeWorkspaceFilePath,
@@ -31,6 +34,14 @@ export function createActionParams(
     }
     case 'discord-snapshot': {
       const query = normalizeText(parameters.query)
+      return query ? { query: truncate(query, 200) } : undefined
+    }
+    case 'hermes-run': {
+      const prompt = normalizePromptText(parameters.prompt) || inferHermesPromptFromText(messageText)
+      return prompt ? { prompt: truncate(prompt, 24_000) } : undefined
+    }
+    case 'inspect-cron-jobs': {
+      const query = normalizeText(parameters.query) || inferCronQueryFromText(messageText)
       return query ? { query: truncate(query, 200) } : undefined
     }
     case 'discord-read-context': {
@@ -110,6 +121,10 @@ export function hasRequiredActionParams(
       return Boolean(params?.query)
     case 'discord-scroll':
       return params?.direction === 'up' || params?.direction === 'down'
+    case 'hermes-run':
+      return Boolean(params?.prompt)
+    case 'inspect-cron-jobs':
+      return true
     case 'discord-type-draft':
       return Boolean(params?.text)
     case 'workspace-read-file':
@@ -158,6 +173,39 @@ function inferSearchQueryFromText(text: string): string {
   }
 
   return trimmed
+}
+
+function inferHermesPromptFromText(text: string): string {
+  const trimmed = text.trim()
+  const quoted = trimmed.match(/[“"]([^”"]{1,24000})[”"]/u)?.[1]
+
+  if (quoted) {
+    return normalizePromptText(quoted)
+  }
+
+  const match = trimmed.match(
+    /(?:consult|ask|run|delegate\s+to)\s+hermes(?:\s+(?:about|on|for|with))?\s*[:：]?\s*(.+)$/isu
+  )
+
+  return normalizePromptText(match?.[1] ?? '')
+}
+
+function inferCronQueryFromText(text: string): string {
+  const trimmed = text.trim()
+  const match = trimmed.match(
+    /(?:hermes\s+)?(?:cron|scheduled)\s+jobs?\s+(?:for|about|matching)\s+(.+)$/iu
+  )
+
+  if (match?.[1]) {
+    return match[1].trim()
+  }
+
+  const llmWikiMatch = trimmed.match(/\bllm\s+wiki\b/iu)
+  if (llmWikiMatch) {
+    return llmWikiMatch[0]
+  }
+
+  return ''
 }
 
 function stripTrailingSentencePunctuation(value: string): string {

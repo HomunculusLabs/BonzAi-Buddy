@@ -11,7 +11,10 @@ export function registerAppIpcHandlers({
       assistantService.getStartupWarnings(),
       assistantService.getRuntimeStatus(),
       assistantService.getAvailableActionTypes(),
-      assistantService.getRuntimeApprovalSettings()
+      assistantService.getRuntimeApprovalSettings(),
+      {
+        hermes: assistantService.getHermesSecondaryRuntimeSummary()
+      }
     )
   })
 }
